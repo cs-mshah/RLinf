@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VLA RL &mdash; 16-831 Project Proposal</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
+  <!-- KaTeX for math rendering -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+    onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}]});"></script>
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #1a1a2e;
+      background: #fdfdfe;
+      line-height: 1.75;
+      font-size: 16px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Container ────────────────────────────────────────────────── */
+    .container { max-width: 860px; margin: 0 auto; padding: 0 24px; }
+
+    /* ── Hero ─────────────────────────────────────────────────────── */
+    .hero {
+      text-align: center;
+      padding: 72px 0 40px;
+      background: linear-gradient(180deg, #f0f4ff 0%, #fdfdfe 100%);
+    }
+    .hero .venue {
+      display: inline-block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #5271ff;
+      background: #eef1ff;
+      padding: 4px 14px;
+      border-radius: 20px;
+      margin-bottom: 18px;
+    }
+    .hero h1 {
+      font-size: 2.4rem;
+      font-weight: 700;
+      line-height: 1.2;
+      color: #0d1b3e;
+      margin-bottom: 24px;
+      letter-spacing: -0.02em;
+    }
+
+    /* ── Authors ──────────────────────────────────────────────────── */
+    .authors {
+      display: flex;
+      justify-content: center;
+      gap: 40px;
+      flex-wrap: wrap;
+      margin-bottom: 28px;
+    }
+    .author-card {
+      text-align: center;
+    }
+    .author-card .name {
+      font-weight: 600;
+      font-size: 1.05rem;
+      color: #a855f7;
+      text-decoration: none;
+      display: block;
+    }
+    a.name:hover { color: #c084fc; }
+    .author-card .affiliation {
+      font-size: 0.85rem;
+      color: #6b7280;
+    }
+    .author-card .email {
+      font-size: 0.82rem;
+      color: #5271ff;
+      text-decoration: none;
+    }
+    .author-card .email:hover { text-decoration: underline; }
+
+    /* ── Action Buttons ───────────────────────────────────────────── */
+    .actions {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 22px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      border: 1.5px solid transparent;
+    }
+    .btn-primary {
+      background: #1a1a2e;
+      color: #fff;
+    }
+    .btn-primary:hover { background: #2d2d4a; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+    .btn-outline {
+      background: #fff;
+      color: #1a1a2e;
+      border-color: #d1d5db;
+    }
+    .btn-outline:hover { border-color: #5271ff; color: #5271ff; transform: translateY(-1px); }
+    .btn svg { width: 16px; height: 16px; }
+
+    /* ── TLDR ─────────────────────────────────────────────────────── */
+    .tldr {
+      background: linear-gradient(135deg, #eef1ff 0%, #e8f4f8 100%);
+      border-left: 4px solid #5271ff;
+      border-radius: 0 10px 10px 0;
+      padding: 20px 26px;
+      margin: 40px 0 0;
+      font-size: 0.95rem;
+      color: #2d3748;
+    }
+    .tldr strong { color: #5271ff; }
+
+    /* ── Sections ─────────────────────────────────────────────────── */
+    section {
+      padding: 48px 0;
+    }
+    section + section { border-top: 1px solid #e8eaed; }
+    h2 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 20px;
+      color: #0d1b3e;
+      letter-spacing: -0.01em;
+    }
+    h3 {
+      font-size: 1.15rem;
+      font-weight: 600;
+      margin: 28px 0 10px;
+      color: #1a1a2e;
+    }
+    p { margin-bottom: 14px; color: #374151; }
+    p:last-child { margin-bottom: 0; }
+
+    /* ── Keywords ─────────────────────────────────────────────────── */
+    .keywords {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .keyword {
+      background: #f0f4ff;
+      color: #5271ff;
+      font-size: 0.78rem;
+      font-weight: 600;
+      padding: 4px 12px;
+      border-radius: 20px;
+      letter-spacing: 0.02em;
+    }
+
+    /* ── Equations ────────────────────────────────────────────────── */
+    .equation-block {
+      background: #f8f9fb;
+      border: 1px solid #e8eaed;
+      border-radius: 8px;
+      padding: 18px 24px;
+      margin: 20px 0;
+      overflow-x: auto;
+      text-align: center;
+    }
+
+    /* ── Table ────────────────────────────────────────────────────── */
+    .table-wrapper {
+      overflow-x: auto;
+      margin: 24px 0;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    thead { background: #f0f4ff; }
+    th {
+      padding: 12px 16px;
+      font-weight: 600;
+      text-align: center;
+      color: #0d1b3e;
+      border-bottom: 2px solid #5271ff;
+    }
+    td {
+      padding: 10px 16px;
+      text-align: center;
+      border-bottom: 1px solid #e8eaed;
+      color: #374151;
+    }
+    tbody tr:hover { background: #f8f9fb; }
+    .mean-row { font-weight: 600; background: #f0f4ff !important; }
+
+    /* ── Figures & Videos ─────────────────────────────────────────── */
+    .figure {
+      margin: 32px 0;
+      text-align: center;
+    }
+    .figure img {
+      max-width: 100%;
+      border-radius: 8px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+    .figure figcaption, .video-grid figcaption {
+      margin-top: 10px;
+      font-size: 0.88rem;
+      color: #6b7280;
+      font-style: italic;
+    }
+
+    .video-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+      margin: 32px 0;
+    }
+    .video-card {
+      background: #f8f9fb;
+      border-radius: 10px;
+      overflow: hidden;
+      border: 1px solid #e8eaed;
+      transition: transform 0.2s, box-shadow 0.2s;
+      cursor: pointer;
+    }
+    .video-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 6px 20px rgba(82,113,255,0.12);
+      border-color: #5271ff;
+    }
+    .video-card video {
+      width: 100%;
+      display: block;
+      aspect-ratio: 16/9;
+      object-fit: cover;
+      background: #0d1b3e;
+    }
+    .video-card figcaption {
+      padding: 10px 14px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: #374151;
+      text-align: center;
+      font-style: normal;
+    }
+
+    /* ── Video Modal ──────────────────────────────────────────────── */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(6px);
+      z-index: 1000;
+      justify-content: center;
+      align-items: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-content {
+      position: relative;
+      max-width: 900px;
+      width: 90%;
+    }
+    .modal-content video {
+      width: 100%;
+      border-radius: 10px;
+    }
+    .modal-close {
+      position: absolute;
+      top: -40px;
+      right: 0;
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+      border: none;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      font-size: 1.2rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.2s;
+    }
+    .modal-close:hover { background: rgba(255,255,255,0.3); }
+
+    /* ── References ───────────────────────────────────────────────── */
+    .references ol {
+      padding-left: 20px;
+    }
+    .references li {
+      margin-bottom: 10px;
+      font-size: 0.88rem;
+      color: #4b5563;
+      line-height: 1.6;
+    }
+    .references li strong { color: #1a1a2e; font-weight: 600; }
+    .references a { color: #5271ff; text-decoration: none; }
+    .references a:hover { text-decoration: underline; }
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    footer {
+      text-align: center;
+      padding: 40px 0;
+      border-top: 1px solid #e8eaed;
+      font-size: 0.82rem;
+      color: #9ca3af;
+    }
+    footer a { color: #5271ff; text-decoration: none; }
+    footer a:hover { text-decoration: underline; }
+
+    /* ── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 768px) {
+      .hero h1 { font-size: 1.7rem; }
+      .authors { gap: 24px; }
+      .video-grid { grid-template-columns: 1fr; }
+      section { padding: 32px 0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════════════════════════════════════════════════════ HERO -->
+<header class="hero">
+  <div class="container">
+    <span class="venue">16-831 &middot; Intro to Robot Learning</span>
+    <h1>Fine-Tuning Vision-Language-Action Models<br/>via RL for Bimanual Manipulation</h1>
+
+    <div class="authors">
+      <div class="author-card">
+        <a class="name" href="https://www.linkedin.com/in/hyeokjoon-kwon/" target="_blank">Joon Kwon</a>
+        <div class="affiliation">Robotics Institute, Carnegie Mellon University</div>
+        <a class="email" href="mailto:joonk2@andrew.cmu.edu">joonk2@andrew.cmu.edu</a>
+      </div>
+      <div class="author-card">
+        <a class="name" href="https://cs-mshah.github.io/" target="_blank">Manan Shah</a>
+        <div class="affiliation">Robotics Institute, Carnegie Mellon University</div>
+        <a class="email" href="mailto:mshah2@andrew.cmu.edu">mshah2@andrew.cmu.edu</a>
+      </div>
+    </div>
+
+    <!-- <div class="actions">
+      <a class="btn btn-primary" href="#">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m.75 12 3 3m0 0 3-3m-3 3v-6m-1.5-9H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z"/></svg>
+        PDF
+      </a>
+      <a class="btn btn-outline" href="#">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75 22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3-4.5 16.5"/></svg>
+        Code
+      </a>
+    </div> -->
+
+    <div class="tldr">
+      <strong>TL;DR &mdash;</strong> We propose to fine-tune OpenVLA-7B with PPO/GRPO via the RLinf system on the RoboEval LiftPot bimanual manipulation task, combined with an iterative dense reward function featuring SO(3) orientation control and smoothness penalties.
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+<!-- ═══════════════════════════════════════════════════════════ ABSTRACT -->
+<section id="abstract">
+  <h2>Abstract</h2>
+  <p>
+    This proposal outlines a framework for achieving sample-efficient policy learning for the LiftPot task within the RoboEval framework, a MuJoCo-based environment requiring coordinated bimanual manipulation to grasp and lift a pot. We first establish a performance baseline by evaluating a random agent against an initial dense reward function composed of spatial distance, pose errors, and subtask progress. To address the complexities of bimanual coordination, we propose two primary modifications: (1)&nbsp;fine-tuning a pre-trained OpenVLA-7B model using RL to leverage foundation model representations for faster convergence, and (2)&nbsp;the iterative refinement of a dense reward function. This second modification focuses on redesigning the initial reward to better capture the complex contact dynamics and physical constraints essential for successful bimanual lifting.
+  </p>
+  <div class="keywords">
+    <span class="keyword">LiftPot</span>
+    <span class="keyword">RoboEval</span>
+    <span class="keyword">OpenVLA</span>
+    <span class="keyword">RL Fine-tuning</span>
+    <span class="keyword">Reward Shaping</span>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ ENVIRONMENT -->
+<section id="environment">
+  <h2>Environment</h2>
+  <p>
+    We evaluate our policy on the <strong>LiftPot</strong> task from the RoboEval benchmark <a href="#ref-roboeval">[1]</a>, a bimanual manipulation environment built on the MuJoCo <a href="#ref-mujoco">[2]</a> physics engine. The task requires a bimanual Franka Panda robot&mdash;consisting of two 7-DOF arms with parallel grippers and an optional 4-DOF floating base&mdash;to grasp a kitchen pot by both handles, lift it above a height threshold, and maintain an upright orientation. Four task variants introduce increasing difficulty by randomizing the pot's initial position and orientation.
+  </p>
+  <p>
+    At each timestep, the agent receives a dictionary observation comprising proprioceptive signals (joint positions and velocities for both arms, gripper openness, and floating base state) as well as RGB and/or depth images from configurable cameras such as the head-mounted and wrist-mounted views. The agent produces a continuous action vector whose structure depends on the chosen control mode. In the default joint-position mode, this is a 20-dimensional vector specifying floating base commands, joint targets for each arm, and gripper commands. Alternatively, an end-effector mode allows the agent to specify Cartesian pose targets, which are internally converted to joint commands via inverse kinematics. The environment provides a sparse binary reward, returning $r=1$ only upon successful task completion.
+  </p>
+  <p>
+    Beyond the binary success signal, the environment records a rich set of diagnostic metrics: four subtask stages (left grasp, right grasp, lift, stable lift), bimanual coordination quality, collision counts, motion smoothness (Cartesian and joint-space jerk), path efficiency, grip slip counts, and task accuracy (lift distance, gripper-to-pot distances, pot orientation error).
+  </p>
+</section>
+
+<!-- ══════════════════════════════════════════════════════ DENSE REWARD -->
+<section id="dense-reward">
+  <h2>Dense Reward</h2>
+  <p>
+    We propose a dense reward function as a baseline to evaluate a random agent, since the RoboEval framework only provides a binary sparse reward, which is always 0 with random actions. The reward function at time step $t$ is:
+  </p>
+  <div class="equation-block">
+    $$r_t = -w_{\text{reach}}\left(d_t^{\text{left}} + d_t^{\text{right}}\right) + w_{\text{grasp}} \cdot p_t + w_{\text{lift}} \cdot \max(0, \Delta h_t) - w_{\text{pose}} \cdot e_t^{\text{pose}} + w_{\text{success}} \cdot \mathbf{1}[\text{success}]$$
+  </div>
+  <p>
+    where $d_t^{\text{left}}$ and $d_t^{\text{right}}$ are the Euclidean distances from the left and right grippers to the pot (in meters), $p_t \in [0, 1]$ is the subtask progress defined as the fraction of completed stages out of four, $\Delta h_t = h_t - h_0$ is the pot's height above its initial resting position, and $e_t^{\text{pose}}$ is the angular deviation from the upright orientation (in radians).
+  </p>
+  <p>
+    The first term encourages both grippers to approach the pot handles, the second rewards incremental task progress, the third incentivizes lifting, the fourth penalizes tilting, and the final term provides a large bonus upon task completion. The default weights are $w_{\text{reach}} = 1.0$, $w_{\text{grasp}} = 2.0$, $w_{\text{lift}} = 5.0$, $w_{\text{pose}} = 0.5$, and $w_{\text{success}} = 10.0$.
+  </p>
+</section>
+
+<!-- ═════════════════════════════════════════════════════════════ METHOD -->
+<section id="method">
+  <h2>Method</h2>
+  <p>
+    Our primary goal is to fine-tune the OpenVLA-7B policy through reinforcement learning to achieve coordinated bimanual manipulation in the LiftPot task, based on the following modifications.
+  </p>
+
+  <h3>Modification #1 &mdash; RL Fine-Tuning via RLinf</h3>
+  <p>
+    By integrating the RoboEval environment into RLinf&mdash;a high-performance training system that transforms high-level RL workflows into optimized micro-execution flows <a href="#ref-rlinf">[3]</a>&mdash;we enable the physics simulator to operate as a distributed worker alongside a large-scale vision-language-action model. This architecture facilitates the fine-tuning of the OpenVLA-7B model <a href="#ref-openvla">[4]</a> using on-policy algorithms, specifically Proximal Policy Optimization (PPO) <a href="#ref-ppo">[5]</a> and Group Relative Policy Optimization (GRPO) <a href="#ref-grpo">[6]</a>.
+  </p>
+  <p>
+    These methods are designed to align large models with specific task objectives and improve their ability to autonomously interact with complex physical environments. By leveraging the scaling capabilities of the RLinf system, we can effectively manage the memory and computational demands of training a 7B-parameter policy for bimanual robotics tasks.
+  </p>
+
+  <h3>Modification #2 &mdash; Dense Reward Refinement</h3>
+  <p>
+    We also plan to compare with off-policy Q-function based and model-based RL algorithms trained in the RoboEval environment. We plan to modify and improve over our initial reward function.
+  </p>
+
+  <h3 style="margin-top:20px;">Trajectory Smoothness</h3>
+  <p>
+    The existing reward does not penalize abrupt or jittery motions, which can damage hardware during sim-to-real transfer. Recent work has incorporated smoothness objectives as regularization directly into the reward <a href="#ref-jiang">[7]</a>, and jerk minimization has been integrated as an explicit objective alongside task accuracy <a href="#ref-zhang">[8]</a>. We propose augmenting the reward with a penalty on either the instantaneous Cartesian jerk or the squared action rate between consecutive timesteps. The RoboEval environment already computes per-step jerk internally for diagnostics, making this readily available for reward shaping.
+  </p>
+
+  <h3>Geometric Orientation Reward on SO(3)</h3>
+  <p>
+    The current reward penalizes orientation error through a scalar deviation from the upright pose, computed via ad hoc dot products. This formulation does not generalize to arbitrary desired orientations and decomposes the error into two independent axis-projection checks that do not correspond to a single coherent distance on SO(3).
+  </p>
+  <p>
+    We propose replacing this term with a reward derived from the geodesic distance on the rotation group SO(3), following the geometric control framework of Bullo &amp; Murray <a href="#ref-bullo">[9]</a>. Given the current pot orientation $R_t \in \mathrm{SO}(3)$ and a desired target orientation $R_d \in \mathrm{SO}(3)$, the orientation error is:
+  </p>
+  <div class="equation-block">
+    $$e_R = \left\| \left( \log R_d^\top R_t \right)^\vee \right\|$$
+  </div>
+  <p>
+    where $(\cdot)^\vee$ denotes the vee map from skew-symmetric matrices to $\mathbb{R}^3$. This scalar error equals the minimum rotation angle needed to align $R_t$ with $R_d$, is coordinate-free, and avoids gimbal lock or representation singularities. The orientation reward term then becomes:
+  </p>
+  <div class="equation-block">
+    $$r_t^{\text{orient}} = -w_{\text{pose}} \cdot e_R$$
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ RESULTS -->
+<section id="results">
+  <h2>Results &mdash; Random Agent</h2>
+  <p>
+    Since actions are sampled uniformly at random, the dense return varies significantly across episodes depending on the resulting arm trajectories. Longer episodes accumulate more penalty as the arms drift farther from the pot handles, increasing the distance-based cost. Additionally, random arm motions can knock the pot over, causing large orientation errors that further penalize the return. Notably, Episode 2 runs for 182 steps yet incurs a relatively modest return of $-52.80$; in this case, the arms happen to randomly remain near the pot and jiggle in place, keeping the distance error low. All episodes result in failure (success&nbsp;=&nbsp;0).
+  </p>
+
+  <div class="figure">
+    <img src="figures/return_plot.png" alt="Random-agent evaluation: accumulated average return versus total environment steps" />
+    <figcaption>Random-agent evaluation: accumulated average return versus total environment steps.</figcaption>
+  </div>
+
+  <div class="table-wrapper">
+    <table>
+      <thead>
+        <tr>
+          <th>Episode</th>
+          <th>Episode Length</th>
+          <th>Dense Return</th>
+          <th>Success</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>1</td><td>16</td><td>$-24.88$</td><td>0</td></tr>
+        <tr><td>2</td><td>182</td><td>$-52.80$</td><td>0</td></tr>
+        <tr><td>3</td><td>57</td><td>$-16.16$</td><td>0</td></tr>
+        <tr><td>4</td><td>23</td><td>$-25.01$</td><td>0</td></tr>
+        <tr><td>5</td><td>200</td><td>$-491.06$</td><td>0</td></tr>
+        <tr class="mean-row"><td>Mean</td><td>95.6</td><td>$-121.98 \pm 184.95$</td><td>0.0</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <figcaption style="text-align:center; font-size:0.88rem; color:#6b7280; font-style:italic; margin-top:-8px;">Random agent evaluation on LiftPot (5 episodes, max 200 steps).</figcaption>
+</section>
+
+<!-- ══════════════════════════════════════════════════════════ VIDEOS -->
+<section id="videos">
+  <h2>Videos</h2>
+  <p>Visualizations of the random agent policy rollouts in the LiftPot environment from different camera views. Click a video to expand.</p>
+
+  <div class="video-grid">
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/3rd_person.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>3rd Person</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/front_view.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>Front View</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>Success</figcaption>
+    </figure>
+  </div>
+</section>
+
+<!-- ═══════════════════════════════════════════════════════ REFERENCES -->
+<section id="references" class="references">
+  <h2>References</h2>
+  <ol>
+    <li id="ref-roboeval">
+      <strong>Y. R. Wang, C. Ung, G. Tannert, J. Duan, J. Li, A. Le, R. Oswal, M. Grotz, W. Pumacay, Y. Deng, R. Krishna, D. Fox, S. Srinivasa.</strong>
+      "RoboEval: Where Robotic Manipulation Meets Structured and Scalable Evaluation."
+      <em>arXiv preprint arXiv:2507.00435</em>, 2025.
+    </li>
+    <li id="ref-mujoco">
+      <strong>E. Todorov, T. Erez, Y. Tassa.</strong>
+      "MuJoCo: A physics engine for model-based control."
+      <em>IEEE/RSJ IROS</em>, pp. 5026&ndash;5033, 2012.
+    </li>
+    <li id="ref-rlinf">
+      <strong>C. Yu, Y. Wang, Z. Guo, et al.</strong>
+      "RLinf: Flexible and Efficient Large-scale Reinforcement Learning via Macro-to-Micro Flow Transformation."
+      <em>arXiv preprint arXiv:2509.15965</em>, 2025.
+    </li>
+    <li id="ref-openvla">
+      <strong>M. J. Kim, K. Pertsch, S. Karamcheti, et al.</strong>
+      "OpenVLA: An Open-Source Vision-Language-Action Model."
+      <em>arXiv preprint arXiv:2406.09246</em>, 2024.
+    </li>
+    <li id="ref-ppo">
+      <strong>J. Schulman, F. Wolski, P. Dhariwal, A. Radford, O. Klimov.</strong>
+      "Proximal Policy Optimization Algorithms."
+      <em>arXiv preprint arXiv:1707.06347</em>, 2017.
+    </li>
+    <li id="ref-grpo">
+      <strong>Z. Shao, P. Wang, Q. Zhu, et al.</strong>
+      "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models."
+      <em>arXiv preprint arXiv:2402.03300</em>, 2024.
+    </li>
+    <li id="ref-jiang">
+      <strong>X. Jiang, S. Zhao, Y. Zhu, Q. Li, J. Zhang.</strong>
+      "A Two-Stage Reinforcement Learning Framework for Humanoid Robot Sitting and Standing-Up."
+      <em>Biomimetics</em>, 10(11):783, 2025.
+    </li>
+    <li id="ref-zhang">
+      <strong>S. Zhang, Q. Xia, M. Chen, S. Cheng.</strong>
+      "Multi-Objective Optimal Trajectory Planning for Robotic Arms Using Deep Reinforcement Learning."
+      <em>Sensors</em>, 23(13):5974, 2023.
+    </li>
+    <li id="ref-bullo">
+      <strong>F. Bullo, R. M. Murray.</strong>
+      "Proportional Derivative (PD) Control on the Euclidean Group."
+      <em>European Control Conference</em>, pp. 1091&ndash;1097, Rome, Italy, 1995.
+    </li>
+  </ol>
+</section>
+
+</main>
+
+<!-- ══════════════════════════════════════════════════════════ FOOTER -->
+<footer>
+  <div class="container">
+    <p>16-831 Introduction to Robot Learning &middot; Carnegie Mellon University &middot; 2026</p>
+  </div>
+</footer>
+
+<!-- ═══════════════════════════════════════════════════════ VIDEO MODAL -->
+<div class="modal-overlay" id="videoModal">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModal()">&times;</button>
+    <video id="modalVideo" controls autoplay loop></video>
+  </div>
+</div>
+
+<script>
+  function openModal(card) {
+    const src = card.querySelector('video').src;
+    const modal = document.getElementById('videoModal');
+    const vid = document.getElementById('modalVideo');
+    vid.src = src;
+    modal.classList.add('active');
+  }
+  function closeModal() {
+    const modal = document.getElementById('videoModal');
+    const vid = document.getElementById('modalVideo');
+    vid.pause();
+    vid.src = '';
+    modal.classList.remove('active');
+  }
+  document.getElementById('videoModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') closeModal();
+  });
+</script>
+
+</body>
+</html>
