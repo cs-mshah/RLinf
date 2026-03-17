@@ -1,0 +1,52 @@
+# Type of environment to use (roboeval simulation suite)
+env_type: roboeval
+# Name of the manipulation task to run
+task_name: LiftPot
+
+# Observation mode: "state" uses low-dimensional state vectors (vs. "image" for pixel observations)
+obs_mode: state
+# Whether to use a shaped dense reward (True) or sparse reward (False)
+use_dense_reward: true
+# Frequency (Hz) at which control actions are applied
+control_frequency: 20
+# Factor by which to downsample observations from the simulation
+downsample_rate: 25
+# Whether to use end-effector control (False = joint-level control)
+ee_control: false
+# Whether the robot base is free-floating (False = fixed base)
+floating_base: false
+
+# Natural language description of the task objective
+task_prompt: "Lift the pot by gripping both handles"
+
+# Random seed for reproducibility
+seed: 0
+# Total number of parallel environments (null = determined automatically)
+total_num_envs: null
+# Number of environments per group for batched operations
+group_size: 1
+
+# Automatically reset environments when episodes terminate
+auto_reset: True
+# Whether to ignore terminal signals and continue episodes (useful for infinite-horizon training)
+ignore_terminations: False
+# Maximum number of steps collected per rollout epoch before updating the policy
+max_steps_per_rollout_epoch: 200
+# Maximum number of steps allowed per episode before forced reset
+max_episode_steps: 200
+
+# Whether to use relative reward (reward difference between consecutive steps)
+use_rel_reward: True
+# Scalar multiplier applied to the reward signal
+reward_coef: 1.0
+# Whether this config is for evaluation mode (disables exploration noise, etc.)
+is_eval: False
+
+# Video recording configuration
+video_cfg:
+  # Whether to record rollout videos
+  save_video: False
+  # Whether to overlay info text (reward, step count, etc.) on the video
+  info_on_video: True
+  # Directory path for saving training videos (uses logger's log path)
+  video_base_dir: ${runner.logger.log_path}/video/train

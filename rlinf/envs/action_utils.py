@@ -183,6 +183,13 @@ def prepare_actions_for_mujoco(raw_chunk_actions, model_type):
     return chunk_actions
 
 
+def prepare_actions_for_roboeval(
+    raw_chunk_actions,
+) -> np.ndarray:
+    """Pass through actions for RoboEval (joint position targets)."""
+    return raw_chunk_actions
+
+
 def prepare_actions(
     raw_chunk_actions,
     env_type: str,
@@ -253,6 +260,10 @@ def prepare_actions(
         chunk_actions = prepare_actions_for_mujoco(
             raw_chunk_actions=raw_chunk_actions,
             model_type=model_type,
+        )
+    elif env_type == SupportedEnvType.ROBOEVAL:
+        chunk_actions = prepare_actions_for_roboeval(
+            raw_chunk_actions=raw_chunk_actions,
         )
     else:
         raise NotImplementedError
