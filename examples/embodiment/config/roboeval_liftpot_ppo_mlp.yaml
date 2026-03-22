@@ -30,7 +30,7 @@ runner:
 
   only_eval: False
   val_check_interval: 10
-  save_interval: -1
+  save_interval: 50
 
   seq_length: 1
   max_prompt_length: 1
@@ -144,9 +144,14 @@ actor:
     add_value_head: true
     is_lora: false
     lora_rank: 32
-    # Action space bounds for tanh squashing (14 joints [-2.5, 2.5] + 2 grippers [0, 1])
-    action_low: [-2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, 0.0, 0.0]
-    action_high: [2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 1.0, 1.0]
+    # Action space bounds for tanh squashing — per-joint MuJoCo ctrlrange for bimanual Panda
+    # Layout: [L_J1..L_J7, R_J1..R_J7, L_gripper, R_gripper]
+    action_low:  [-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973,
+                  -2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973,
+                  0.0, 0.0]
+    action_high: [ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973,
+                   2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973,
+                   1.0, 1.0]
 
   optim:
     lr: 3.0e-4
