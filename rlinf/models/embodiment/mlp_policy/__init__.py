@@ -26,6 +26,8 @@ def get_model(cfg: DictConfig, torch_dtype=torch.bfloat16):
         add_value_head=cfg.add_value_head,
         add_q_head=cfg.get("add_q_head", False),
         q_head_type=cfg.get("q_head_type", "default"),
+        action_low=cfg.get("action_low", None),
+        action_high=cfg.get("action_high", None),
     )
 
     return model

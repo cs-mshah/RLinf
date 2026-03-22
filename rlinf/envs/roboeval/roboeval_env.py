@@ -179,6 +179,9 @@ class RoboEvalEnv(gymnasium.Env):
         )
 
         self.video_cfg = _cfg_get(cfg, "video_cfg", None)
+        self._save_video = bool(
+            _cfg_get(self.video_cfg, "save_video", False)
+        ) if self.video_cfg is not None else False
 
         self.obs_mode = str(_cfg_get(cfg, "obs_mode", "state")).lower()
         self.obs_mode = (
@@ -254,8 +257,21 @@ class RoboEvalEnv(gymnasium.Env):
                     CameraConfig(name="right_wrist", rgb=True, depth=False, resolution=tuple(cam_res)),
                 ]
             )
+        elif self._save_video:
+            # State mode but video recording is on: add a single camera for
+            # rendering video frames (observations remain state-only).
+            video_res = _cfg_get(self.cfg, "video_resolution", [256, 256])
+            if not isinstance(video_res, (list, tuple)):
+                video_res = [int(video_res), int(video_res)]
+            obs_config = ObservationConfig(
+                cameras=[
+                    CameraConfig(name="head", rgb=True, depth=False, resolution=tuple(video_res)),
+                ]
+            )
         else:
             obs_config = ObservationConfig(cameras=[])
+
+        render_mode = "rgb_array" if self._save_video else None
 
         env = task_cls(
             action_mode=JointPositionActionMode(
@@ -266,7 +282,7 @@ class RoboEvalEnv(gymnasium.Env):
                 floating_dofs=[],
             ),
             observation_config=obs_config,
-            render_mode=None,
+            render_mode=render_mode,
             robot_cls=BimanualPanda,
             control_frequency=control_frequency,
         )
@@ -382,13 +398,25 @@ class RoboEvalEnv(gymnasium.Env):
 
     # ── obs wrapping ──────────────────────────────────────────────────
 
-    def _wrap_obs(self, raw_obs: Any) -> dict[str, Any]:
+    def _wrap_obs(self, raw_obs: Any, env_idx: int = 0) -> dict[str, Any]:
         """Convert a single env observation to RLinf dict format."""
         if self.obs_mode == "state":
             # FlattenPropObsWrapper already flattened to 1-D numpy
             state_np = np.asarray(raw_obs, dtype=np.float32).reshape(-1)
             state = torch.from_numpy(state_np).to(self.device)
-            return {"states": state}
+            result = {"states": state}
+            # When video recording is enabled in state mode, render a frame
+            # from the underlying env so RecordVideo can capture it.
+            if self._save_video:
+                frame = self.envs[env_idx].render()
+                if frame is not None:
+                    frame_np = np.asarray(frame, dtype=np.uint8)
+                    if frame_np.ndim == 3 and frame_np.shape[0] in (1, 3, 4):
+                        frame_np = np.moveaxis(frame_np, 0, -1)
+                    result["main_images"] = torch.from_numpy(
+                        np.ascontiguousarray(frame_np)
+                    ).to(self.device)
+            return result
 
         # RGB mode
         state_parts = []
@@ -561,7 +589,7 @@ class RoboEvalEnv(gymnasium.Env):
                         else int(seed) + i
                     )
                 raw_obs, info = self.envs[i].reset(seed=seed_i)
-                obs_list.append(self._wrap_obs(raw_obs))
+                obs_list.append(self._wrap_obs(raw_obs, env_idx=i))
                 info_list.append(info if isinstance(info, dict) else {})
             else:
                 obs_list.append(self._index_cached_obs(i))
@@ -668,14 +696,14 @@ class RoboEvalEnv(gymnasium.Env):
 
         raw_obs, rew, terminated, truncated, info = env.step(action.reshape(-1))
 
-        obs = self._wrap_obs(raw_obs)
+        obs = self._wrap_obs(raw_obs, env_idx=env_idx)
         info = info if isinstance(info, dict) else {}
         return obs, info, float(rew), bool(terminated), bool(truncated), True
 
     def _index_cached_obs(self, env_idx: int) -> dict[str, Any]:
         if self._last_obs is None:
             raw_obs, _ = self.envs[env_idx].reset()
-            return self._wrap_obs(raw_obs)
+            return self._wrap_obs(raw_obs, env_idx=env_idx)
         out: dict[str, Any] = {}
         for k, v in self._last_obs.items():
             if isinstance(v, torch.Tensor) and v.shape[0] == self.num_envs:

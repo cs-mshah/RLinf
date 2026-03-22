@@ -443,16 +443,30 @@ class EnvWorker(Worker):
                 if self.cfg.env.train.video_cfg.save_video and isinstance(
                     self.env_list[i], RecordVideo
                 ):
-                    self.env_list[i].flush_video()
+                    interval = self.cfg.env.train.video_cfg.get(
+                        "video_record_interval", 1
+                    )
+                    if self.train_video_cnt % interval == 0:
+                        self.env_list[i].flush_video()
+                    else:
+                        self.env_list[i].render_images = []
                 self.env_list[i].update_reset_state_ids()
+            self.train_video_cnt += 1
         elif mode == "eval":
             for i in range(self.stage_num):
                 if self.cfg.env.eval.video_cfg.save_video and isinstance(
                     self.eval_env_list[i], RecordVideo
                 ):
-                    self.eval_env_list[i].flush_video()
+                    interval = self.cfg.env.eval.video_cfg.get(
+                        "video_record_interval", 1
+                    )
+                    if self.eval_video_cnt % interval == 0:
+                        self.eval_env_list[i].flush_video()
+                    else:
+                        self.eval_env_list[i].render_images = []
                 if not self.cfg.env.eval.auto_reset:
                     self.eval_env_list[i].update_reset_state_ids()
+            self.eval_video_cnt += 1
 
     def split_env_batch(
         self,

@@ -1,7 +1,7 @@
 defaults:
-  - env/roboeval_liftpot_state@env.train
-  - env/roboeval_liftpot_state@env.eval
-  - model/mlp_policy@actor.model
+  - env/roboeval_liftpot_vision@env.train
+  - env/roboeval_liftpot_vision@env.eval
+  - model/cnn_policy@actor.model
   - training_backend/fsdp@actor.fsdp_config
   - override hydra/job_logging: stdout
 
@@ -15,14 +15,14 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor,env,rollout: "0,1"
+    actor,env,rollout: 0
 
 runner:
   task_type: embodied
   logger:
     log_path: "../results"
     project_name: rlinf
-    experiment_name: "roboeval_liftpot_ppo_mlp"
+    experiment_name: "roboeval_liftpot_ppo_cnn"
     logger_backends: ["tensorboard"]
 
   max_epochs: 200
@@ -55,7 +55,7 @@ algorithm:
   loss_type: actor_critic
   loss_agg_func: token-mean
   kl_beta: 0.0
-  entropy_bonus: 0
+  entropy_bonus: 0.01
 
   clip_ratio_high: 0.2
   clip_ratio_low: 0.2
@@ -99,7 +99,7 @@ env:
       video_base_dir: ${runner.logger.log_path}/video/train
       video_record_interval: 10
   eval:
-    total_num_envs: 16
+    total_num_envs: 8
     group_size: ${algorithm.group_size}
 
     use_rel_reward: True
@@ -128,29 +128,32 @@ actor:
   group_name: ActorGroup
   training_backend: fsdp
   micro_batch_size: 32
-  global_batch_size: 64
+  global_batch_size: 32
   seed: 1234
   enable_offload: false
 
   model:
-    model_type: mlp_policy
+    model_type: cnn_policy
     model_path: ""
     policy_setup: panda-qpos
-    obs_dim: 38
+    image_size: [3, 128, 128]
+    image_num: 3
+    state_dim: 30
     action_dim: 16
     num_action_chunks: 1
     hidden_dim: 256
     precision: "32"
     add_value_head: true
+    add_q_head: false
+    backbone: resnet
     is_lora: false
     lora_rank: 32
-    # Action space bounds for tanh squashing (14 joints [-2.5, 2.5] + 2 grippers [0, 1])
-    action_low: [-2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, 0.0, 0.0]
-    action_high: [2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 2.5, 1.0, 1.0]
+    encoder_config:
+      ckpt_name: "resnet10_pretrained.pt"
 
   optim:
-    lr: 3.0e-4
-    value_lr: 3.0e-4
+    lr: 1.0e-4
+    value_lr: 1.0e-4
     adam_beta1: 0.9
     adam_beta2: 0.999
     adam_eps: 1.0e-08

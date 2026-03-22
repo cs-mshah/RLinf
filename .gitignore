@@ -20,3 +20,6 @@ uv.lock
 rlinf/envs/maniskill/assets
 PKG-INFO
 *.egg-info/
+slurm/logs/
+*.err
+*.out

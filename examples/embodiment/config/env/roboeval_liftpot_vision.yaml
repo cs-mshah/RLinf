@@ -3,8 +3,10 @@ env_type: roboeval
 # Name of the manipulation task to run
 task_name: LiftPot
 
-# Observation mode: "state" uses low-dimensional state vectors (vs. "image" for pixel observations)
-obs_mode: state
+# Observation mode: "rgb" uses multi-camera pixel observations
+obs_mode: rgb
+# Camera resolution [H, W]
+camera_resolution: [128, 128]
 # Whether to use a shaped dense reward (True) or sparse reward (False)
 use_dense_reward: true
 # Frequency (Hz) at which control actions are applied

@@ -32,6 +32,8 @@ class MLPPolicy(nn.Module, BasePolicy):
         add_value_head,
         add_q_head,
         q_head_type="default",
+        action_low=None,
+        action_high=None,
     ):
         super().__init__()
         self.obs_dim = obs_dim
@@ -49,6 +51,20 @@ class MLPPolicy(nn.Module, BasePolicy):
             self.value_head = ValueHead(
                 obs_dim, hidden_sizes=(256, 256, 256), activation=activation
             )
+            # Enable tanh squashing for PPO when action bounds are provided
+            if action_low is not None and action_high is not None:
+                self.final_tanh = True
+                self.logstd_range = (-5, 2)
+                action_low = torch.tensor(action_low, dtype=torch.float32)
+                action_high = torch.tensor(action_high, dtype=torch.float32)
+                self.register_buffer(
+                    "action_scale", (action_high - action_low) / 2.0
+                )
+                self.register_buffer(
+                    "action_bias", (action_high + action_low) / 2.0
+                )
+                action_scale = "already_set"
+
         if add_q_head:
             self.independent_std = False
             self.final_tanh = True
@@ -88,7 +104,7 @@ class MLPPolicy(nn.Module, BasePolicy):
         else:
             self.actor_logstd = nn.Linear(256, action_dim)
 
-        if action_scale is not None:
+        if action_scale is not None and action_scale != "already_set":
             l, h = action_scale
             self.register_buffer(
                 "action_scale", torch.tensor((h - l) / 2.0, dtype=torch.float32)
@@ -96,7 +112,7 @@ class MLPPolicy(nn.Module, BasePolicy):
             self.register_buffer(
                 "action_bias", torch.tensor((h + l) / 2.0, dtype=torch.float32)
             )
-        else:
+        elif action_scale is None:
             self.action_scale = None
 
         self.cuda_graph_manager = None
@@ -174,7 +190,18 @@ class MLPPolicy(nn.Module, BasePolicy):
 
         output_dict = {}
         if compute_logprobs:
-            logprobs = probs.log_prob(action)
+            if self.final_tanh and self.action_scale is not None:
+                # Invert tanh squashing to recover the raw (pre-tanh) action
+                action_normalized = (action - self.action_bias) / self.action_scale
+                action_normalized = torch.clamp(action_normalized, -0.999999, 0.999999)
+                raw_action = torch.atanh(action_normalized)
+                logprobs = probs.log_prob(raw_action)
+                # Tanh log-prob correction: log |det J| of the squashing
+                logprobs = logprobs - torch.log(
+                    self.action_scale * (1 - action_normalized.pow(2)) + 1e-6
+                )
+            else:
+                logprobs = probs.log_prob(action)
             output_dict.update(logprobs=logprobs)
         if compute_entropy:
             entropy = probs.entropy()
@@ -197,7 +224,7 @@ class MLPPolicy(nn.Module, BasePolicy):
             action_logstd = self.actor_logstd.expand_as(action_mean)
         else:
             action_logstd = self.actor_logstd(feat)
-        if self.final_tanh:
+        if self.final_tanh and not self.independent_std:
             action_logstd = torch.tanh(action_logstd)
             action_logstd = self.logstd_range[0] + 0.5 * (
                 self.logstd_range[1] - self.logstd_range[0]
