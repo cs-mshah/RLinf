@@ -31,15 +31,40 @@ __all__ = ["RoboEvalEnv"]
 # ── Gymnasium wrappers (inlined from RoboEval/rob16831) ──────────────
 
 class _LiftPotDenseRewardWrapper(gymnasium.Wrapper):
-    """Dense shaped reward for LiftPot from the info dict."""
+    """Dense shaped reward for LiftPot from the info dict.
 
-    def __init__(self, env, w_reach=1.0, w_grasp=2.0, w_lift=5.0, w_pose=0.5, w_success=10.0):
+    Reward components:
+        - reach:       penalise gripper-to-pot distance
+        - grasp:       reward subtask progress (grasp stages)
+        - lift:        reward upward pot displacement
+        - pose:        penalise pot orientation error
+        - success:     large bonus on task completion
+        - action_rate: penalise squared change in action between steps
+                       (encourages smooth, slow movements)
+    """
+
+    def __init__(
+        self,
+        env,
+        w_reach=1.0,
+        w_grasp=2.0,
+        w_lift=5.0,
+        w_pose=0.5,
+        w_success=10.0,
+        w_action_rate=0.0,
+    ):
         super().__init__(env)
         self.w_reach = w_reach
         self.w_grasp = w_grasp
         self.w_lift = w_lift
         self.w_pose = w_pose
         self.w_success = w_success
+        self.w_action_rate = w_action_rate
+        self._prev_action = None
+
+    def reset(self, **kwargs):
+        self._prev_action = None
+        return self.env.reset(**kwargs)
 
     def step(self, action):
         obs, sparse_reward, terminated, truncated, info = self.env.step(action)
@@ -50,15 +75,25 @@ class _LiftPotDenseRewardWrapper(gymnasium.Wrapper):
         pose_error = info.get("object_pose_error", 0.0)
         subtask_progress = info.get("subtask_progress", 0.0)
         success = info.get("success", 0.0)
+
+        # Action rate penalty: squared L2 of action change
+        action_rate_penalty = 0.0
+        if self.w_action_rate > 0.0 and self._prev_action is not None:
+            diff = np.asarray(action, dtype=np.float32) - self._prev_action
+            action_rate_penalty = float(np.sum(diff ** 2))
+        self._prev_action = np.asarray(action, dtype=np.float32).copy()
+
         dense_reward = (
             -self.w_reach * (d_left + d_right)
             + self.w_grasp * subtask_progress
             + self.w_lift * max(0.0, lift_dist)
             - self.w_pose * pose_error
             + self.w_success * float(success)
+            - self.w_action_rate * action_rate_penalty
         )
         info["sparse_reward"] = sparse_reward
         info["dense_reward"] = dense_reward
+        info["action_rate_penalty"] = action_rate_penalty
         return obs, dense_reward, terminated, truncated, info
 
 
@@ -290,7 +325,12 @@ class RoboEvalEnv(gymnasium.Env):
         # Dense reward wrapper
         use_dense_reward = bool(_cfg_get(self.cfg, "use_dense_reward", True))
         if use_dense_reward:
-            env = _LiftPotDenseRewardWrapper(env)
+            reward_kwargs = {}
+            for rk in ("w_reach", "w_grasp", "w_lift", "w_pose", "w_success", "w_action_rate"):
+                val = _cfg_get(self.cfg, rk, None)
+                if val is not None:
+                    reward_kwargs[rk] = float(val)
+            env = _LiftPotDenseRewardWrapper(env, **reward_kwargs)
 
         # Max episode steps wrapper
         max_episode_steps = int(_cfg_get(self.cfg, "max_episode_steps", 200))
