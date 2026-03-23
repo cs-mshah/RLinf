@@ -1,6 +1,6 @@
 # PR: Action Smoothness Penalty + SAC Config + PPO Hyperparameter Tuning
 
-**Source branch:** `reward-shaping-sac`
+**Source branch:** `ppo-config2`
 **Target branch:** `roboeval-integration`
 
 ---
@@ -69,6 +69,36 @@ SAC advantages for this task:
 - Off-policy = much more sample efficient (reuses past experience)
 - Better suited for 16-DOF continuous action spaces
 
+### 4. Random Agent Baseline Script
+
+**File:** `scripts/eval_random_agent.py`
+
+Standalone script to evaluate a random policy on LiftPot, providing a lower-bound baseline for learning curves:
+- Instantiates a single `RoboEvalEnv` from any experiment config, overriding Hydra interpolations (`group_size`, `video_cfg`) that don't resolve outside the full Hydra config tree
+- Runs N episodes (default 3) with uniform random actions sampled from the action space bounds
+- Reports mean and std of episode returns, and optionally saves results to a JSON file for use by `plot_return.py`
+- Uses absolute (non-relative) dense reward to match eval-time reward computation
+
+### 5. Multi-Experiment Plotting Script
+
+**File:** `scripts/plot_return.py`
+
+Rewritten to support overlaying multiple experiments on a single plot:
+- Accepts repeated `--config` / `--results` / `--name` flags, matched 1:1 — each experiment gets its own `steps_per_epoch` computed from its config (e.g. PPO: 32×200=6400, SAC: 32×2=64)
+- **Single experiment**: plots both train and eval curves
+- **Multiple experiments**: plots only eval curves to keep the comparison clean
+- `--random-baseline <JSON>` or `--random-return <float>`: draws a dotted horizontal line for the random agent baseline
+- `--title` overrides the auto-generated title
+- `--output` accepts a directory (auto-generates filename) or a file path
+
+### 6. SLURM Scripts
+
+**Files:** `slurm/ppo_train.sh` (renamed from `slurm/train.sh`), `slurm/sac_train.sh` (new)
+
+- `ppo_train.sh`: renamed for clarity, now runs the PPO v2 config by default (`roboeval_liftpot_ppo_mlp_v2`), with commented-out blocks for original PPO and CNN configs
+- `sac_train.sh`: new SLURM script for SAC training with `RAY_ADDRESS=local` (required for SAC's off-policy replay), 8-hour wall time (longer than PPO due to replay buffer warmup)
+- Both scripts write results to `../results/<job_name>_<job_id>/` and move log files to `LOG_DIR` after completion
+
 ## Files Changed
 
 | File | Change |
@@ -76,6 +106,11 @@ SAC advantages for this task:
 | `rlinf/envs/roboeval/roboeval_env.py` | Action rate penalty in `_LiftPotDenseRewardWrapper`; forward reward kwargs from config |
 | `examples/embodiment/config/roboeval_liftpot_ppo_mlp_v2.yaml` | New tuned PPO config |
 | `examples/embodiment/config/roboeval_liftpot_sac_mlp.yaml` | New SAC config |
+| `scripts/eval_random_agent.py` | New random agent evaluation script with JSON output |
+| `scripts/plot_return.py` | Rewritten to support multi-experiment comparison plots with random baseline |
+| `slurm/ppo_train.sh` | Renamed from `train.sh`, updated to use PPO v2 config |
+| `slurm/sac_train.sh` | New SLURM script for SAC training |
+| `slurm/submit_job_test.sh` | Removed (superseded by per-algorithm scripts) |
 
 ## Backward Compatibility
 
@@ -90,9 +125,12 @@ SAC advantages for this task:
 - [ ] Check eval videos for both: arms should move smoothly, base should not topple
 - [ ] Verify original PPO config still produces identical results (backward compat)
 - [ ] Ablation: try `w_action_rate` values 0.05, 0.1, 0.2 to find best smoothness/progress trade-off
+- [ ] Run `eval_random_agent.py` to establish random baseline, then use `plot_return.py` to generate PPO vs SAC comparison plot
 
 ## Recommended Run Order
 
-1. **PPO v2 first** — fastest to validate since it's a direct comparison to the v1 baseline
-2. **SAC second** — takes longer to start learning (replay buffer warmup) but should ultimately achieve better performance
-3. If SAC works well, try `q_head_type: crossq` for faster Q-network training (no target network lag)
+1. **Random baseline** — run `eval_random_agent.py` to get the lower-bound return
+2. **PPO v2 first** — fastest to validate since it's a direct comparison to the v1 baseline
+3. **SAC second** — takes longer to start learning (replay buffer warmup) but should ultimately achieve better performance
+4. **Comparison plot** — use `plot_return.py` with both results dirs and the random baseline JSON
+5. If SAC works well, try `q_head_type: crossq` for faster Q-network training (no target network lag)
