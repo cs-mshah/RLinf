@@ -517,6 +517,25 @@
   </div>
 </section>
 
+<!-- ═══════════════════════════════════════════════════ MIDTERM REPORT -->
+<section id="midterm">
+  <h2>Midterm Report &mdash; PPO &amp; SAC from Scratch</h2>
+  <p>
+    As an initial baseline, we train both an on-policy (PPO) and off-policy (SAC) agent from scratch on the LiftPot task using a small MLP policy. Neither method uses pretrained weights or demonstration data. Below are evaluation rollout videos for each method.
+  </p>
+
+  <div class="video-grid" style="grid-template-columns: repeat(2, 1fr);">
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/ppo_v2_cropped.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>PPO (on-policy) Eval Rollout</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/sac_cropped.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>SAC (off-policy) Eval Rollout</figcaption>
+    </figure>
+  </div>
+</section>
+
 <!-- ═══════════════════════════════════════════════════════ REFERENCES -->
 <section id="references" class="references">
   <h2>References</h2>
