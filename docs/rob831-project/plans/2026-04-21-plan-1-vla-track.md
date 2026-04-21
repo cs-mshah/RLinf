@@ -61,11 +61,13 @@ Run:
 ```bash
 sinfo -p ROBO -o "%N %t %G %C"
 scontrol show reservation ROBOcis220039p | head -5
+scontrol show reservation ROBOGPU | head -5
 ```
 
 Expected:
 - `robo-gh005 ... gpu:h100:8 ...` is in `ROBO` partition and is `resv` or `idle+resv`.
-- Reservation `State=ACTIVE`, accounts includes `cis220039p`, end time ≥ 2026-04-28.
+- Reservation `ROBOcis220039p` `State=ACTIVE`, accounts includes `cis220039p`, end time ≥ 2026-04-28.
+- Reservation `ROBOGPU` starts 2026-04-24 on `robo-gh006`. It becomes a second node available to this account from Apr 24 onward — use it in Tasks 15/16 if M1 is still running on `robo-gh005` and you want to start M2b in parallel. Until Apr 24, all jobs target only `ROBOcis220039p`/`robo-gh005`.
 
 If partition is not called `ROBO`, record the actual name and replace it in every SLURM script in Task 5+.
 
@@ -301,7 +303,19 @@ set -eo pipefail
 module load anaconda3 cuda
 source activate rlinf-openvlaoft
 
-export REPO_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+# SLURM sometimes doesn't preserve BASH_SOURCE across sbatch. Fall back to
+# SLURM_SUBMIT_DIR (the working directory at submission time = the repo root
+# when you sbatch from the RLinf checkout). If neither is set, require the
+# caller to export REPO_PATH manually.
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+    export REPO_PATH=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
+elif [ -n "${SLURM_SUBMIT_DIR:-}" ]; then
+    export REPO_PATH="${SLURM_SUBMIT_DIR}"
+else
+    echo "ERROR: cannot resolve REPO_PATH — export it manually before sourcing _common.sh" >&2
+    exit 1
+fi
+
 export EMBODIED_PATH="${REPO_PATH}/examples/embodiment/"
 export MUJOCO_GL=egl
 export HYDRA_FULL_ERROR=1
@@ -497,11 +511,19 @@ actor:
   model:
     model_path: ${oc.env:VLA_CKPT_PATH}
   fsdp_config:
-    strategy: "no_shard"              # single-GPU, no FSDP sharding
+    # IMPORTANT: RLinf's `strategy` field only accepts "fsdp" or "fsdp2".
+    # To disable sharding on a single GPU, keep strategy="fsdp" and set
+    # sharding_strategy="no_shard" (see examples/embodiment/config/
+    # libero_10_ppo_openpi.yaml for the canonical pattern).
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    fsdp_size: -1
     gradient_checkpointing: True
 ```
 
-- [ ] **Step 2: Verify the override chain parses**
+`env.train.total_num_envs: 32` is a pragmatic choice for single-GPU throughput (down from 128 in the 8-GPU base config). It is **not** from the spec §4.5 rescaling table — the spec left per-GPU env count implicit. 32 envs keeps `num_group = total_num_envs / group_size = 32 / 4 = 8 GRPO groups per rollout`, which is enough signal for policy updates at this scale. If H100 memory allows more during Task 9, bumping to 64 is fine.
+
+- [ ] **Step 2: Verify the override chain parses (including both train and eval group sizes, and FSDP fields)**
 
 Run:
 ```bash
@@ -518,11 +540,22 @@ with initialize_config_dir(version_base='1.1', config_dir='$PWD/examples/embodim
 print('max_epochs:', cfg.runner.max_epochs)
 print('micro_batch:', cfg.actor.micro_batch_size)
 print('global_batch:', cfg.actor.global_batch_size)
-print('group_size:', cfg.algorithm.group_size)
+print('group_size (algo):', cfg.algorithm.group_size)
+print('train group_size:', cfg.env.train.group_size)
+print('eval group_size:', cfg.env.eval.group_size)
+print('train total_num_envs:', cfg.env.train.total_num_envs)
+print('eval total_num_envs:', cfg.env.eval.total_num_envs)
+print('fsdp strategy:', cfg.actor.fsdp_config.strategy)
+print('fsdp sharding:', cfg.actor.fsdp_config.sharding_strategy)
 "
 ```
 
-Expected: `max_epochs: 150`, `micro_batch: 2`, `global_batch: 32`, `group_size: 4`.
+Expected:
+- `max_epochs: 150`, `micro_batch: 2`, `global_batch: 32`, `group_size (algo): 4`
+- `train group_size: 4` (from `${algorithm.group_size}`), `eval group_size: 1` (inherited from the base config)
+- `fsdp strategy: fsdp`, `fsdp sharding: no_shard`
+
+If `eval group_size` does not resolve to `1`, add an explicit `env.eval.group_size: 1` override to the M1 config before continuing.
 
 - [ ] **Step 3: Commit**
 
@@ -910,8 +943,57 @@ def test_se3_reward_subtask_progress_both_grasps_plus_lift():
     env = LiftPotSE3RewardWrapper(_MockLiftPotEnv())
     env.reset()
     _, _, _, _, info = env.step(env.action_space.sample())
-    # Both grasps + lift > 5 cm → subtask_progress == 1.0.
-    assert info["subtask_progress"] == pytest.approx(1.0)
+    # Both grasps + lift > 5 cm → 0.5*(1+1) + 0.25*1 = 1.25  (spec §6 formula).
+    assert info["subtask_progress"] == pytest.approx(1.25)
+
+
+class _MockEnvWithOverrides(_MockLiftPotEnv):
+    """Mock env where the info dict can be overridden per-step for sign tests."""
+
+    def __init__(self, overrides):
+        super().__init__()
+        self._overrides = overrides
+
+    def step(self, action):
+        obs, rew, term, trunc, info = super().step(action)
+        info.update(self._overrides)
+        return obs, rew, term, trunc, info
+
+
+def test_se3_reward_monotone_in_position_error():
+    """Reward strictly decreases as pot drifts further from target."""
+    near_env = LiftPotSE3RewardWrapper(_MockEnvWithOverrides({
+        "pot_pos": np.array([0.0, 0.0, 0.09]),           # 1 cm off target (0,0,0.1)
+        "target_pos": np.array([0.0, 0.0, 0.1]),
+    }))
+    far_env = LiftPotSE3RewardWrapper(_MockEnvWithOverrides({
+        "pot_pos": np.array([0.0, 0.0, -0.4]),           # 50 cm off target
+        "target_pos": np.array([0.0, 0.0, 0.1]),
+    }))
+    near_env.reset(); far_env.reset()
+    _, r_near, _, _, _ = near_env.step(np.zeros(14, dtype=np.float32))
+    _, r_far,  _, _, _ = far_env.step(np.zeros(14, dtype=np.float32))
+    assert r_near > r_far, (r_near, r_far)
+
+
+def test_se3_reward_success_bonus_applied_when_success_true():
+    no_success_env = LiftPotSE3RewardWrapper(_MockEnvWithOverrides({"success": False}))
+    success_env    = LiftPotSE3RewardWrapper(_MockEnvWithOverrides({"success": True}))
+    no_success_env.reset(); success_env.reset()
+    _, r_no,  _, _, _ = no_success_env.step(np.zeros(14, dtype=np.float32))
+    _, r_yes, _, _, _ = success_env.step(np.zeros(14, dtype=np.float32))
+    # Default w_success = 10.0, so the success bonus must raise reward by ~10.
+    assert r_yes - r_no == pytest.approx(10.0, abs=1e-5)
+
+
+def test_se3_reward_weight_zero_on_rotation_removes_that_term():
+    default_env = LiftPotSE3RewardWrapper(_MockLiftPotEnv())
+    no_rot_env  = LiftPotSE3RewardWrapper(_MockLiftPotEnv(), w_R=0.0)
+    default_env.reset(); no_rot_env.reset()
+    _, r_def, _, _, _ = default_env.step(np.zeros(14, dtype=np.float32))
+    _, r_0,   _, _, _ = no_rot_env.step(np.zeros(14, dtype=np.float32))
+    # Default had rotation error pi/6, default w_R=0.3 → r_0 > r_def by 0.3*pi/6.
+    assert r_0 - r_def == pytest.approx(0.3 * np.pi / 6, abs=1e-5)
 
 
 def test_se3_reward_action_smoothness_zero_on_first_step():
@@ -1022,9 +1104,10 @@ class LiftPotSE3RewardWrapper(gym.Wrapper):
         gl = bool(info.get("grasp_left_success", False))
         gr = bool(info.get("grasp_right_success", False))
         lift = float(info.get("lift_distance", 0.0))
-        subtask_progress = 0.5 * (float(gl) + float(gr))
-        if gl and gr and lift > 0.05:
-            subtask_progress = 1.0
+        # Spec §6: 0.5·(grasp_left + grasp_right) + 0.25·1[lift_distance > 5 cm]
+        subtask_progress = 0.5 * (float(gl) + float(gr)) + (
+            0.25 if lift > 0.05 else 0.0
+        )
         success = bool(info.get("success", False))
 
         # --- action smoothness ---
@@ -1085,7 +1168,17 @@ git commit -m "feat(robotwin): add LiftPotSE3RewardWrapper with unit tests"
 
 **Pre-task investigation:** the wrapper expects fields like `pot_pos`, `target_rot_mat`, `left_handle_pose`, etc. in the env's `info` dict. RoboTwin's underlying task may or may not expose these. Step 1 is an investigation spike; the wiring that follows depends on what we find.
 
-- [ ] **Step 1: Investigate which pose fields RoboTwin's lift_pot exposes**
+- [ ] **Step 1a: Determine whether `RoboTwinEnv` is a single-env wrapper or a vector env**
+
+Read `rlinf/envs/robotwin/robotwin_env.py` (full file):
+- Look for `self.env = ...` or similar single-underlying-env assignment.
+- Look for subprocess/multiprocess patterns (`mp.Process`, `SubprocVecEnv`, worker pools) that suggest vector semantics.
+
+Record the finding in `docs/rob831-project/notes/robotwin_info_dict.md`:
+- **Case A — `RoboTwinEnv` holds one underlying gym.Env** (e.g., `self._base_env` or `self.env`): we'll use `gym.Wrapper` composition in Step 3.
+- **Case B — `RoboTwinEnv` dispatches to multiple subprocess workers**: `gym.Wrapper` composition won't work (can't wrap across process boundaries). Instead, reward must be recomputed inline in `RoboTwinEnv.step` after the worker returns, using the per-env info dict assembled from each process. In this case, the Step 3 wiring changes from `self.env = LiftPotSE3RewardWrapper(self.env)` to `self.reward_fn = LiftPotSE3RewardFn(**weights)` invoked per-env inside `step`. The `LiftPotSE3RewardWrapper` class from Task 12 exposes the reward math as a `gym.Wrapper`; if Case B holds, extract the core reward computation into a plain function or static method on the same module and call it directly. No code change needed to the math — only to the integration point.
+
+- [ ] **Step 1b: Investigate which pose fields RoboTwin's lift_pot exposes**
 
 Run an interactive probe (inside `rlinf-openvlaoft` conda env):
 ```bash
@@ -1112,12 +1205,31 @@ for k, v in (info.items() if isinstance(info, dict) else []):
         print(" ", k, v.shape if hasattr(v, "shape") else type(v))
     else:
         print(" ", k, type(v).__name__)
+
+# If the info dict is empty or sparse, peek directly at the underlying task object:
+# look for attributes with 'pot', 'handle', 'gripper', 'target' in the name.
+print("\n--- candidate attrs on the task object ---")
+try:
+    task = getattr(env, "_base_env", None) or getattr(env, "env", None)
+    for name in dir(task):
+        if any(k in name.lower() for k in ["pot", "handle", "gripper", "target", "pose"]):
+            print(" ", name)
+except Exception as e:
+    print("introspection failed:", e)
 PY
 ```
 
-Expected: prints the list of info keys. Record which of the expected fields (`pot_pos`, `pot_rot_mat`, `target_pos`, `target_rot_mat`, `left_gripper_pose`, `right_gripper_pose`, `left_handle_pose`, `right_handle_pose`, `grasp_left_success`, `grasp_right_success`, `lift_distance`, `success`) are already there, which aren't.
+Expected: prints the list of info keys, plus any task-object attributes whose names reference pose-relevant objects. Record every field of the expected set (`pot_pos`, `pot_rot_mat`, `target_pos`, `target_rot_mat`, `left_gripper_pose`, `right_gripper_pose`, `left_handle_pose`, `right_handle_pose`, `grasp_left_success`, `grasp_right_success`, `lift_distance`, `success`) as one of: **(i) already in info**, **(ii) derivable from a task attribute**, **(iii) not available**.
 
-Save the findings to `docs/rob831-project/notes/robotwin_info_dict.md`.
+Save findings to `docs/rob831-project/notes/robotwin_info_dict.md`.
+
+- [ ] **Step 1c: Branch on findings**
+
+Based on the investigation, decide which branch to take before continuing:
+
+1. **All fields accessible (via info or task attributes):** proceed to Step 2 and implement the full wiring.
+2. **Partial — pot pose accessible, gripper/handle poses not:** drop the `gripper-to-handle alignment` term (set `w_ga: 0.0` in the SE(3) env config). Spec §6 explicitly allows this fallback. Update the notes file to record what was dropped. Proceed to Step 2 with the reduced field set.
+3. **Pot pose genuinely inaccessible via any supported API:** STOP. The SE(3) reward wrapper cannot be implemented as specified. Escalate: document the blocker in the notes file, update the spec's Modification-2 section to record that the VLA+SE(3) comparison can't be run on this task, and **skip Tasks 13 Step 2–5, 15, 16 for the VLA track.** In that case the M2 contribution collapses to the MLP side only (Plan 2's M2a), and the writeup must reflect that.
 
 - [ ] **Step 2: Depending on findings, augment the RoboTwin env to surface missing fields**
 
@@ -1142,21 +1254,41 @@ If the RoboTwin API doesn't cleanly expose a pose, fall back to reading sim stat
 
 - [ ] **Step 3: Hook the reward wrapper based on `reward_variant` config**
 
-Add (near the top of `RoboTwinEnv.__init__` or wherever the env is wrapped internally):
+Implementation depends on the Case decision from Step 1a.
+
+**If Case A (single underlying env):** use standard `gym.Wrapper` composition.
 ```python
+# In RoboTwinEnv.__init__, near where the underlying task env is assigned
+# (grep for the assignment via `grep -n 'self\.[a-z_]* *=.*Task\|self\.env *=' rlinf/envs/robotwin/robotwin_env.py`)
 self.reward_variant = str(cfg.get("reward_variant", "default")).lower()
-# ...later, after the underlying env is built:
+# ...after the underlying env is built:
 if self.reward_variant == "se3":
     from rlinf.envs.robotwin.lift_pot_reward_wrapper import LiftPotSE3RewardWrapper
-    # Extract reward weights if present in cfg
-    weights = {}
-    for k in ["w_p", "w_R", "w_ga", "w_lift", "w_grasp", "w_success", "w_smooth"]:
-        if k in cfg:
-            weights[k] = float(cfg[k])
+    weights = {k: float(cfg[k]) for k in
+               ["w_p", "w_R", "w_ga", "w_lift", "w_grasp", "w_success", "w_smooth"]
+               if k in cfg}
     self.env = LiftPotSE3RewardWrapper(self.env, **weights)
 ```
 
-Exact insertion point depends on the file's current structure — read the `__init__` and locate where the underlying task env is assigned to `self.env`.
+**If Case B (subprocess workers):** extract the reward math as a callable and apply it per-env after workers return.
+
+First, extract the reward math into a plain function on the reward module. Add this helper at the bottom of `rlinf/envs/robotwin/lift_pot_reward_wrapper.py`:
+```python
+def compute_se3_reward(info: dict, prev_action, action, weights: dict) -> float:
+    """Same reward as LiftPotSE3RewardWrapper.step, but as a pure function.
+    Use when the env is vectorized across processes and a gym.Wrapper can't be applied.
+    Populates SE(3)/SO(3) diagnostics back into `info` in place.
+    """
+    # ... body is identical to the body of LiftPotSE3RewardWrapper.step() above,
+    # with self.w_p etc. replaced by weights["w_p"] etc., and prev_action
+    # supplied by the caller. Refactor to share code with the Wrapper class.
+```
+
+Then in `RoboTwinEnv.step`, after each env returns, call `compute_se3_reward(info_i, prev_action_i, action_i, weights)` and replace the scalar reward element for env i. Maintain `self._prev_actions` as a list of length `num_envs`.
+
+Exact insertion point in either case: grep `grep -n 'def step' rlinf/envs/robotwin/robotwin_env.py` and add the reward override near the end of the `step` method, before `infos` is collated.
+
+Document the chosen branch in the commit message.
 
 - [ ] **Step 4: Create the SE(3) env config variant**
 
