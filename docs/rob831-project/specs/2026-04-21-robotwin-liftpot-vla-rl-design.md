@@ -299,7 +299,7 @@ HYDRA_FULL_ERROR=1
 | M2b VLA-GRPO + SE(3) | 1 | ~8–12 h |
 | **Total (sequential)** | | **~32–40 h** |
 
-**Binding constraint is the 7-day calendar**, not compute. We overlap implementation with training runtime (write B2 config while B1 trains, write SE(3) wrapper while B2 trains, etc.) to hit the April 28 deadline.
+Total wall-clock is comfortably inside the deadline. The binding constraint is implementation/debugging throughput, not compute — we overlap coding with training runtime (write next config while current run trains), and execute stages ASAP rather than on a fixed day schedule. Opportunistic multi-GPU bursts (if an idle H100 becomes available) can further compress the VLA runs.
 
 **Reservations (yours):**
 - `ROBOcis220039p`: `robo-gh005`, 8× H100, active now through 2026-05-15.
@@ -332,51 +332,55 @@ VLA runs get `--gres=gpu:h100:1` too (with the scaled-down config) and `--time=1
 
 ---
 
-## 10. Day-by-day plan (7-day sprint, due 2026-04-28)
+## 10. Execution plan (ordered stages, execute ASAP)
 
-Training is sequential on 1 GPU, so implementation work is overlapped with training runtime wherever possible.
+Deadline is 2026-04-28 but we execute as fast as the compute allows. No hard day-boxing. Implementation work is overlapped with training runtime wherever possible (write next config / wrapper / MBPO code while the current training job runs). If additional idle GPUs become available opportunistically (other ROBO nodes, non-reserved `GPU` partition, etc.), we use them to parallelize independent training jobs — but the default assumption is single-GPU sequential on `robo-gh005`.
 
-### Day 1 — Tue Apr 21: Env + B4
+### Stage 0 — Preflight
 - Verify SLURM partition / reservation (`sinfo -p ROBO`, `scontrol show reservation ROBOcis220039p`).
 - Build `rlinf-openvlaoft` conda env. Download SFT checkpoint.
-- Run **B4** (VLA zero-shot eval, ~30 min).
-- **Gate:** if B4 success < 20%, debug checkpoint / unnorm key / camera config before spending any more compute. If in the middle, proceed.
 
-### Day 2 — Wed Apr 22: State obs + B1
-- Add state-obs mode to RoboTwin env wrapper (§7): proprioception + pot pose + target pose, expose phase diagnostics in `infos`.
-- Write B1 config using RLinf conventions (not RoboEval port).
-- Submit **B1** (~2 h).
-- While B1 trains: write B2 config.
+### Stage 1 — B4 (VLA zero-shot eval)
+- Run B4 (~0.5 h). Primary purpose: confirm env + checkpoint + eval pipeline all work end-to-end before committing any more compute.
+- **Gate:** if B4 success < 20%, stop and debug checkpoint / `unnorm_key` / camera config. Otherwise proceed — the zero-shot number itself is useful regardless of magnitude.
 
-### Day 3 — Thu Apr 23: B2 + SE(3) wrapper
-- Submit **B2** (~4 h).
-- While B2 trains: implement SE(3)/SO(3) reward wrapper (§6).
-- After B2 ends: submit **M2a** (~4 h).
+### Stage 2 — State-obs plumbing + B1 (MLP-PPO)
+- Add `obs_mode: state` to the RoboTwin env wrapper (§7): proprioception + pot pose + target pose, expose phase-level diagnostics in `infos`.
+- Write B1 config using RLinf's state-based RL conventions (not a RoboEval port).
+- Run B1 (~2 h).
+- **Gate:** if B1 is at ≤5% success after 2× budgeted training time, state features are likely inadequate — revisit the obs spec before continuing.
 
-### Day 4 — Fri Apr 24: MBPO (simplest-viable) + B3
-- Implement **minimal MBPO**: single MLP dynamics model (not an ensemble), H=1 synthetic rollouts (Dyna-1), 95% model / 5% real mixing. Target ≤200 LOC, 1 day. If the `sac_worker.py` audit shows even this is >1 day of work, **drop B3** and accept a 2-algorithm baseline (document clearly in the report — "MBRL was scoped out due to repo integration cost").
-- Submit **B3** if implementation landed (~6 h); otherwise skip.
+### Stage 3 — B2 (MLP-SAC)
+- Write B2 config (reuse the state-obs env from Stage 2).
+- Run B2 (~4 h).
 
-### Day 5 — Sat Apr 25: M1 (VLA-GRPO)
-- Write scaled-down 1-GPU VLA-GRPO config (§4.5).
-- Submit **M1** (~8–12 h). This is the longest training job; start it early in the day.
-- While M1 trains: start drafting the report (intro, methods sections can be written without final numbers).
+### Stage 4 — SE(3)/SO(3) reward wrapper + M2a
+- Implement the reward wrapper (§6). While it's being written, Stage 3 may still be training.
+- Run M2a (~4 h). This is the paired ablation against B2.
 
-### Day 6 — Sun Apr 26: Buffer / M2b if time / plots
-- If M1 finished overnight and results look good: optionally submit **M2b** (~8–12 h). Otherwise **skip M2b** and report M2 comparison on the MLP side only (B2 vs M2a).
-- Generate plots from all completed runs (`scripts/plot_return.py`).
-- Record eval videos for each final checkpoint.
+### Stage 5 — MBPO audit + B3 (conditional)
+- Audit the SAC worker to scope the Dyna-1 injection. **Hard gate:** if audit suggests >1 day of implementation, **drop B3** and document. Course still has two RL algorithms (PPO, SAC) plus the VLA experiments.
+- If audit cleared: implement minimal Dyna-1 MBPO (§4.3), ~200 LOC. Run B3 (~6 h).
 
-### Day 7 — Mon Apr 27: Writeup
-- Finish the report: intro, related work (brief), methods per-row, results, discussion of negatives, conclusion.
-- Commit report to `docs/rob831-project/`.
+### Stage 6 — M1 (VLA-GRPO fine-tune)
+- Write the 1-GPU scaled-down VLA-GRPO config (§4.5).
+- Run M1 (~8–12 h on 1 GPU). If an additional H100 happens to be idle, using 2 GPUs halves the wall time — worth checking before submission.
 
-### Due Tue Apr 28: Submit.
+### Stage 7 — M2b (VLA × SE(3) reward), *only if time allows*
+- Run M2b (~8–12 h). First thing to drop if the calendar gets tight.
 
-**Hard dropouts in priority order** (the moment the schedule slips):
+### Stage 8 — Analysis & writeup
+- Generate plots (`scripts/plot_return.py`), record eval videos.
+- Write the report (intro, methods, results, discussion of negatives, conclusion). Commit under `docs/rob831-project/`.
+
+**Stage ordering rationale:** B4 → B1 → B2 → M2a → B3 → M1 → M2b. Early stages validate the env + pipeline before we commit expensive compute; the VLA runs (longest) are late so an unexpected blocker at an earlier stage doesn't waste GPU hours; M2b is last so it's the cleanest thing to drop.
+
+**Hard dropouts in priority order** (if the calendar gets tight):
 1. **M2b** (VLA × SE(3) reward) — first to drop; the M2 story stands on B2 vs M2a alone.
-2. **B3 (MBPO)** — drop if minimal Dyna-1 integration takes >1 day.
-3. **M1** — absolute last to drop since it's Modification 1's headline; if it has to go, the whole VLA+RL contribution collapses and we'd need to revisit scope with the instructor.
+2. **B3 (MBPO)** — drop if the Stage-5 audit shows Dyna-1 integration is >1 day.
+3. **M1** — absolute last to drop since it's Modification 1's headline; if it has to go, the VLA+RL contribution collapses and we'd revisit scope with the instructor.
+
+**Opportunistic parallelism:** if you pick up a couple of idle GPUs for a few hours (outside the reservation), the natural candidates to run in parallel are (a) M1 alongside a later MLP run, or (b) B3 alongside M2a — both pairs are independent jobs with independent configs. Don't chase this aggressively; it's a bonus not a requirement.
 
 ---
 
