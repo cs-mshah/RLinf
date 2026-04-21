@@ -25,8 +25,15 @@ echo "[build_env] host=$(hostname)"
 echo "[build_env] start=$(date -Iseconds)"
 
 # --- Modules ------------------------------------------------------------
-module load anaconda3 cuda
-echo "[build_env] loaded anaconda3, cuda"
+# NOTE: default PSC gcc (8.x) is too old for PyTorch C++ extension builds
+# (pytorch3d + curobo rebuild CUDA kernels and require gcc >= 9). Load gcc/10.2.0.
+module load anaconda3 cuda gcc/10.2.0
+export CC=$(command -v gcc)
+export CXX=$(command -v g++)
+echo "[build_env] loaded anaconda3, cuda, gcc/10.2.0"
+echo "[build_env] CC=${CC} (gcc $(gcc -dumpversion))"
+echo "[build_env] CXX=${CXX} (g++ $(g++ -dumpversion))"
+echo "[build_env] nvcc: $(command -v nvcc) ($(nvcc --version 2>&1 | tail -1))"
 
 # --- Bootstrap uv (the install.sh dependency) ---------------------------
 # install.sh requires `uv` on PATH; if it's not already installed, add it
@@ -38,6 +45,12 @@ if ! command -v uv >/dev/null 2>&1; then
     hash -r
 fi
 echo "[build_env] uv: $(command -v uv) ($(uv --version 2>/dev/null || echo 'version-unknown'))"
+
+# --- Clean any partial .venv from a previous failed run -----------------
+if [ -d "${REPO_PATH}/.venv" ]; then
+    echo "[build_env] removing existing .venv for a clean rebuild"
+    rm -rf "${REPO_PATH}/.venv"
+fi
 
 # --- Run the repo's install script --------------------------------------
 # --no-root: we're not root on PSC (skips system-package apt steps).
