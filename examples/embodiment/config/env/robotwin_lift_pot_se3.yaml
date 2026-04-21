@@ -1,0 +1,17 @@
+# Env variant: RoboTwin lift_pot with SE(3)/SO(3)-based reward wrapper.
+# Consumed by robotwin_lift_pot_grpo_openvlaoft_1gpu_se3.yaml (M2b).
+# See docs/rob831-project/specs/2026-04-21-robotwin-liftpot-vla-rl-design.md §6.
+
+defaults:
+  - robotwin_lift_pot
+
+reward_variant: "se3"
+
+# Reward weights
+w_p: 1.0
+w_R: 0.3
+w_ga: 0.5
+w_lift: 5.0
+w_grasp: 2.0
+w_success: 10.0
+w_smooth: 0.1

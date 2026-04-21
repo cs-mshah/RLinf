@@ -1,0 +1,17 @@
+# M2b: VLA-GRPO on 1 H100 with SE(3)/SO(3) reward wrapper.
+# Same as M1 except the train/eval env uses the SE(3) reward variant.
+
+defaults:
+  - robotwin_lift_pot_grpo_openvlaoft_1gpu
+  - env/robotwin_lift_pot_se3@env.train
+  - env/robotwin_lift_pot_se3@env.eval
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+runner:
+  logger:
+    experiment_name: "m2b_vla_grpo_se3_1gpu"
