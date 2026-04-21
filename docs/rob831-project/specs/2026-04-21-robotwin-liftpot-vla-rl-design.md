@@ -344,43 +344,50 @@ Deadline is 2026-04-28 but we execute as fast as the compute allows. No hard day
 - Run B4 (~0.5 h). Primary purpose: confirm env + checkpoint + eval pipeline all work end-to-end before committing any more compute.
 - **Gate:** if B4 success < 20%, stop and debug checkpoint / `unnorm_key` / camera config. Otherwise proceed — the zero-shot number itself is useful regardless of magnitude.
 
-### Stage 2 — State-obs plumbing + B1 (MLP-PPO)
+### Stage 2 — M1 (VLA-GRPO fine-tune) — *the headline contribution, done early*
+- Write the 1-GPU scaled-down VLA-GRPO config (§4.5).
+- Run M1 (~8–12 h on 1 GPU). If an additional H100 is available opportunistically, 2 GPUs halves the wall time — worth checking at submission time.
+- While M1 trains: **start implementing the SE(3)/SO(3) reward wrapper (§6)** — it's env-side and policy-agnostic, so its development is independent of M1.
+- **Gate:** if M1 fails to improve over B4 at all (e.g., eval curve is flat or regressing after ~30% of `max_epochs`), pause and sanity-check: sampling temperature, grad-accum arithmetic, LoRA freeze/unfreeze layers. The single-GPU scaling is new and carries convergence risk.
+
+### Stage 3 — M2b (VLA + SE(3) reward)
+- Once the SE(3) reward wrapper from Stage 2 is done: run M2b (~8–12 h). Paired ablation against M1 — same model, same config, only the reward differs.
+- **If M1 already produced a solid result (B4 success + substantial delta from M1)**, M2b's upside is adding SE(3) on top of an already-working VLA; if M1 was flat, M2b's purpose shifts to "does better shaping rescue a marginal run."
+
+### Stage 4 — State-obs plumbing + B1 (MLP-PPO)
 - Add `obs_mode: state` to the RoboTwin env wrapper (§7): proprioception + pot pose + target pose, expose phase-level diagnostics in `infos`.
 - Write B1 config using RLinf's state-based RL conventions (not a RoboEval port).
 - Run B1 (~2 h).
 - **Gate:** if B1 is at ≤5% success after 2× budgeted training time, state features are likely inadequate — revisit the obs spec before continuing.
 
-### Stage 3 — B2 (MLP-SAC)
-- Write B2 config (reuse the state-obs env from Stage 2).
+### Stage 5 — B2 (MLP-SAC)
+- Write B2 config (reuse the state-obs env from Stage 4).
 - Run B2 (~4 h).
 
-### Stage 4 — SE(3)/SO(3) reward wrapper + M2a
-- Implement the reward wrapper (§6). While it's being written, Stage 3 may still be training.
-- Run M2a (~4 h). This is the paired ablation against B2.
+### Stage 6 — M2a (MLP-SAC + SE(3) reward)
+- SE(3) reward wrapper already exists from Stage 2, so M2a is cheap — just a new env config + job submission.
+- Run M2a (~4 h). Paired ablation against B2.
 
-### Stage 5 — MBPO audit + B3 (conditional)
+### Stage 7 — MBPO audit + B3 (conditional)
 - Audit the SAC worker to scope the Dyna-1 injection. **Hard gate:** if audit suggests >1 day of implementation, **drop B3** and document. Course still has two RL algorithms (PPO, SAC) plus the VLA experiments.
 - If audit cleared: implement minimal Dyna-1 MBPO (§4.3), ~200 LOC. Run B3 (~6 h).
-
-### Stage 6 — M1 (VLA-GRPO fine-tune)
-- Write the 1-GPU scaled-down VLA-GRPO config (§4.5).
-- Run M1 (~8–12 h on 1 GPU). If an additional H100 happens to be idle, using 2 GPUs halves the wall time — worth checking before submission.
-
-### Stage 7 — M2b (VLA × SE(3) reward), *only if time allows*
-- Run M2b (~8–12 h). First thing to drop if the calendar gets tight.
 
 ### Stage 8 — Analysis & writeup
 - Generate plots (`scripts/plot_return.py`), record eval videos.
 - Write the report (intro, methods, results, discussion of negatives, conclusion). Commit under `docs/rob831-project/`.
 
-**Stage ordering rationale:** B4 → B1 → B2 → M2a → B3 → M1 → M2b. Early stages validate the env + pipeline before we commit expensive compute; the VLA runs (longest) are late so an unexpected blocker at an earlier stage doesn't waste GPU hours; M2b is last so it's the cleanest thing to drop.
+**Stage ordering rationale:** B4 → M1 → M2b → (MLP baselines) → M2a → B3. The VLA track is the headline contribution and carries the most unknown (single-GPU scaling of a bimanual OpenVLA-OFT GRPO config is not a well-trodden recipe) — doing it early means we find out quickly whether the approach works at all. The SE(3) reward wrapper is written during M1's training wall-clock, so by Stage 3 we can run M2b immediately; the same wrapper is reused for M2a with no additional code work. MLP baselines (B1, B2, MBPO) are cheap and predictable, so they land later without much schedule risk.
 
 **Hard dropouts in priority order** (if the calendar gets tight):
-1. **M2b** (VLA × SE(3) reward) — first to drop; the M2 story stands on B2 vs M2a alone.
-2. **B3 (MBPO)** — drop if the Stage-5 audit shows Dyna-1 integration is >1 day.
-3. **M1** — absolute last to drop since it's Modification 1's headline; if it has to go, the VLA+RL contribution collapses and we'd revisit scope with the instructor.
+1. **B3 (MBPO)** — first to drop if the Stage-7 audit shows Dyna-1 integration is >1 day. Course survives with 2 RL algorithms + clear scope justification.
+2. **M2a** — second to drop; M2b already makes the SE(3)-reward point on the stronger VLA policy, so the MLP version is an ablation-of-an-ablation.
+3. **B1 or B2** — very unlikely to drop (each is ≤4 h of compute and satisfies the RL-family rubric). Only drop if we genuinely can't finish MLP infrastructure in time.
+4. **M1 and M2b** — never drop; these are the headline VLA contributions.
 
-**Opportunistic parallelism:** if you pick up a couple of idle GPUs for a few hours (outside the reservation), the natural candidates to run in parallel are (a) M1 alongside a later MLP run, or (b) B3 alongside M2a — both pairs are independent jobs with independent configs. Don't chase this aggressively; it's a bonus not a requirement.
+**Opportunistic parallelism:** if you pick up idle H100s outside the reservation:
+- While M1 runs on the ROBO node, a spare GPU can start M2b on the same config+reward-wrapper as soon as the wrapper is written (independent training jobs).
+- In the MLP phase (Stages 4–7), B1 / B2 / B3 / M2a are all independent and fully parallelizable across whatever GPUs are available.
+Don't chase this aggressively; the sequential plan already fits the deadline. It's a bonus if idle capacity shows up.
 
 ---
 
