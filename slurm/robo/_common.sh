@@ -27,6 +27,18 @@ source "${REPO_PATH}/.venv/bin/activate"
 
 export EMBODIED_PATH="${REPO_PATH}/examples/embodiment/"
 export MUJOCO_GL=egl
+# sapien uses Vulkan for rendering; headless GPU nodes need an nvidia ICD JSON.
+for _vk_icd in /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json /etc/vulkan/icd.d/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json; do
+    if [ -f "$_vk_icd" ]; then
+        export VK_ICD_FILENAMES="$_vk_icd"
+        break
+    fi
+done
+# PyOpenGL fallback (matches examples/embodiment/run_embodiment.sh).
+export PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-egl}
+# ROBOT_PLATFORM selects action-dim/normalization preset for the VLA.
+# For RoboTwin PIPER bimanual (14-DOF), ALOHA is the closest-fitting preset.
+export ROBOT_PLATFORM=${ROBOT_PLATFORM:-ALOHA}
 export HYDRA_FULL_ERROR=1
 
 # RoboTwin repo — must be on PYTHONPATH; the RLinf install script does NOT
