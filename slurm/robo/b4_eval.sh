@@ -14,7 +14,7 @@
 source "${SLURM_SUBMIT_DIR}/slurm/robo/_common.sh"
 
 python examples/embodiment/eval_embodied_agent.py \
-  --config-path=examples/embodiment/config/ \
+  --config-path="${REPO_PATH}/examples/embodiment/config/" \
   --config-name=robotwin_lift_pot_grpo_openvlaoft_eval_1gpu \
   runner.logger.log_path="${RESULTS_DIR}"
 
