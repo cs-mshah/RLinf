@@ -27,14 +27,15 @@ source "${REPO_PATH}/.venv/bin/activate"
 
 export EMBODIED_PATH="${REPO_PATH}/examples/embodiment/"
 export MUJOCO_GL=egl
-# sapien uses Vulkan for rendering; headless GPU nodes need an nvidia ICD JSON.
-# PSC sets VK_ICD_FILENAMES=/etc/vulkan/icd.d/nvidia_icd.json by default but that
-# file does not exist on robo-gh005 — only /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
-# does. Unconditionally pick the first existing candidate (overrides any preset).
-unset VK_ICD_FILENAMES
+# sapien uses Vulkan for rendering. Vulkan 1.3+ reads VK_DRIVER_FILES first and
+# falls back to VK_ICD_FILENAMES. PSC pre-sets *both* to /etc/vulkan/icd.d/nvidia_icd.json
+# which doesn't exist on robo-gh005 — only /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json
+# does. Unset both and pick the first existing candidate for each.
+unset VK_ICD_FILENAMES VK_DRIVER_FILES
 for _vk_icd in /usr/share/vulkan/icd.d/nvidia_icd.x86_64.json /etc/vulkan/icd.d/nvidia_icd.json /usr/share/vulkan/icd.d/nvidia_icd.json; do
     if [ -f "$_vk_icd" ]; then
         export VK_ICD_FILENAMES="$_vk_icd"
+        export VK_DRIVER_FILES="$_vk_icd"
         break
     fi
 done
