@@ -53,6 +53,21 @@ class RoboTwinEnv(gym.Env):
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         self.use_custom_reward = cfg.use_custom_reward
 
+        # SE(3)/SO(3) reward variant (spec §6; Plan 1 Task 13, Case B wiring).
+        # When reward_variant == "se3", RoboTwinEnv.step() recomputes the reward
+        # per-env using compute_se3_reward_from_info() — RoboTwin is vectorized
+        # across subprocess workers so a gym.Wrapper can't be composed in.
+        self.reward_variant = str(
+            OmegaConf.select(cfg, "reward_variant", default="default")
+        ).lower()
+        self.se3_reward_weights = {}
+        if self.reward_variant == "se3":
+            for k in ("w_p", "w_R", "w_ga", "w_lift", "w_grasp", "w_success", "w_smooth"):
+                v = OmegaConf.select(cfg, k, default=None)
+                if v is not None:
+                    self.se3_reward_weights[k] = float(v)
+            self._prev_actions_se3 = [None] * self.num_envs
+
         self.video_cfg = cfg.video_cfg
 
         self.cfg = cfg
@@ -275,6 +290,26 @@ class RoboTwinEnv(gym.Env):
         raw_obs, step_reward, terminations, truncations, info_list = self.venv.step(
             actions
         )
+
+        # SE(3)/SO(3) reward override (spec §6). Done before info_list is collated
+        # so each per-env info dict is available unflattened.
+        if self.reward_variant == "se3":
+            from rlinf.envs.robotwin.lift_pot_reward_wrapper import (
+                compute_se3_reward_from_info,
+            )
+            # `actions` is [n_envs, horizon, action_dim]; use the last action of
+            # the chunk as "the action" for smoothness bookkeeping.
+            step_actions = actions[:, -1, :]
+            se3_rewards = []
+            for i, info_i in enumerate(info_list):
+                prev = self._prev_actions_se3[i]
+                r_i = compute_se3_reward_from_info(
+                    info_i, prev, step_actions[i], self.se3_reward_weights
+                )
+                se3_rewards.append(r_i)
+                self._prev_actions_se3[i] = np.asarray(step_actions[i], dtype=np.float32).copy()
+            step_reward = se3_rewards  # list of floats; coerced to tensor below
+
         extracted_obs = self._extract_obs_image(raw_obs)
         infos = list_of_dict_to_dict_of_list(info_list)
 
@@ -287,7 +322,7 @@ class RoboTwinEnv(gym.Env):
                 np.array(truncations).reshape(-1), device=self.device
             )
 
-        if self.use_custom_reward:
+        if self.use_custom_reward and self.reward_variant != "se3":
             step_reward = self._calc_step_reward(terminations)
         else:
             if isinstance(step_reward, list):

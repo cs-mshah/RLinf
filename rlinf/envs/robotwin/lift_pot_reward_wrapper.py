@@ -12,7 +12,91 @@ import numpy as np
 
 from rlinf.envs.robotwin.se3_math import se3_log_map, so3_geodesic_distance
 
-__all__ = ["LiftPotSE3RewardWrapper"]
+__all__ = ["LiftPotSE3RewardWrapper", "compute_se3_reward_from_info"]
+
+
+_POSE_FIELDS_3 = ("pot_pos", "target_pos")
+_POSE_FIELDS_ROT = ("pot_rot_mat", "target_rot_mat")
+_POSE_FIELDS_GRIPPER = (
+    "left_gripper_pose",
+    "right_gripper_pose",
+    "left_handle_pose",
+    "right_handle_pose",
+)
+
+
+def compute_se3_reward_from_info(
+    info: dict,
+    prev_action: Optional[np.ndarray],
+    action: np.ndarray,
+    weights: dict,
+) -> float:
+    """Reward function equivalent to LiftPotSE3RewardWrapper.step, as a pure function.
+
+    Use when the underlying env is vectorized across subprocess workers and a
+    ``gym.Wrapper`` can't be applied (Case B in plan §13). Populates SE(3)/SO(3)
+    diagnostics back into ``info`` in place.
+
+    Missing pose fields fall back to identity/zero: the returned reward is still
+    finite, but the corresponding error term contributes zero. The caller should
+    check ``info.get("pose_fields_missing")`` on the first step to detect this.
+    """
+    # Track which expected keys are actually present (for debugging).
+    missing = [k for k in _POSE_FIELDS_3 + _POSE_FIELDS_ROT + _POSE_FIELDS_GRIPPER
+               if k not in info]
+    if missing:
+        info.setdefault("pose_fields_missing", missing)
+
+    pot_pos = np.asarray(info.get("pot_pos", np.zeros(3)))
+    target_pos = np.asarray(info.get("target_pos", np.zeros(3)))
+    pot_rot = np.asarray(info.get("pot_rot_mat", np.eye(3)))
+    target_rot = np.asarray(info.get("target_rot_mat", np.eye(3)))
+
+    pos_err = float(np.linalg.norm(pot_pos - target_pos))
+    rot_err = so3_geodesic_distance(pot_rot, target_rot)
+
+    def _twist(handle_key: str, gripper_key: str) -> float:
+        H = np.asarray(info.get(handle_key, np.eye(4)))
+        G = np.asarray(info.get(gripper_key, np.eye(4)))
+        return float(np.linalg.norm(se3_log_map(np.linalg.inv(H) @ G)))
+
+    align_err = _twist("left_handle_pose", "left_gripper_pose") + _twist(
+        "right_handle_pose", "right_gripper_pose"
+    )
+
+    gl = bool(info.get("grasp_left_success", False))
+    gr = bool(info.get("grasp_right_success", False))
+    lift = float(info.get("lift_distance", 0.0))
+    subtask_progress = 0.5 * (float(gl) + float(gr)) + (0.25 if lift > 0.05 else 0.0)
+    success = bool(info.get("success", False))
+
+    a = np.asarray(action, dtype=np.float32).reshape(-1)
+    if prev_action is None:
+        action_rate = 0.0
+    else:
+        action_rate = float(np.sum((a - prev_action) ** 2))
+
+    reward = (
+        -weights.get("w_p", 1.0) * pos_err
+        - weights.get("w_R", 0.3) * rot_err
+        - weights.get("w_ga", 0.5) * align_err
+        + weights.get("w_lift", 5.0) * max(0.0, lift)
+        + weights.get("w_grasp", 2.0) * subtask_progress
+        + weights.get("w_success", 10.0) * float(success)
+        - weights.get("w_smooth", 0.1) * action_rate
+    )
+
+    info.update(
+        {
+            "pose_error_pos": pos_err,
+            "pose_error_rot": rot_err,
+            "gripper_handle_alignment": align_err,
+            "subtask_progress": subtask_progress,
+            "action_rate_penalty": action_rate,
+            "reward_se3": reward,
+        }
+    )
+    return reward
 
 
 class LiftPotSE3RewardWrapper(gym.Wrapper):
