@@ -1,0 +1,56 @@
+# M1: RL fine-tune of VLA (OpenVLA-OFT) on RoboTwin lift_pot, 1 H100, LoRA.
+# Derived from robotwin_lift_pot_grpo_openvlaoft.yaml with the rescaling in
+# docs/rob831-project/specs/2026-04-21-robotwin-liftpot-vla-rl-design.md §4.5.
+
+defaults:
+  - robotwin_lift_pot_grpo_openvlaoft
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor, env, rollout: 0
+
+runner:
+  only_eval: False
+  max_epochs: 150
+  val_check_interval: 10
+  save_interval: 10
+  logger:
+    experiment_name: "m1_vla_grpo_1gpu"
+    logger_backends: ["tensorboard"]
+
+algorithm:
+  group_size: 4
+
+env:
+  train:
+    total_num_envs: 32
+    group_size: ${algorithm.group_size}
+    assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/train_seeds.json
+  eval:
+    total_num_envs: 16
+    group_size: 1
+    assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
+    video_cfg:
+      save_video: True
+
+actor:
+  micro_batch_size: 2
+  global_batch_size: 32     # = micro_batch(2) * grad_accum(16) — effective PPO-style batch
+  model:
+    model_path: ${oc.env:VLA_CKPT_PATH}
+  fsdp_config:
+    # RLinf's `strategy` field accepts only "fsdp" or "fsdp2".
+    # Single-GPU disable-sharding is expressed via sharding_strategy=no_shard.
+    strategy: "fsdp"
+    sharding_strategy: "no_shard"
+    fsdp_size: -1
+    gradient_checkpointing: True

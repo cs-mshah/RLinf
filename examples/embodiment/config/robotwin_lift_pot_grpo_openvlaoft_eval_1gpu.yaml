@@ -1,0 +1,43 @@
+# B4: Eval-only VLA (OpenVLA-OFT SFT'd on RoboTwin lift_pot) on 1 H100.
+# Derives from robotwin_lift_pot_grpo_openvlaoft.yaml; overrides:
+#   - runner.only_eval = True       (skips training loop)
+#   - cluster placement -> single GPU
+#   - actor.model.model_path -> local checkpoint via env var
+#   - assets/seeds paths -> resolved from env vars
+
+defaults:
+  - robotwin_lift_pot_grpo_openvlaoft
+  - override hydra/job_logging: stdout
+
+hydra:
+  run:
+    dir: .
+  output_subdir: null
+
+cluster:
+  num_nodes: 1
+  component_placement:
+    actor, env, rollout: 0
+
+runner:
+  only_eval: True
+  logger:
+    experiment_name: "b4_vla_zeroshot"
+    logger_backends: ["tensorboard"]
+
+env:
+  train:
+    total_num_envs: 16
+    assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
+  eval:
+    total_num_envs: 16
+    assets_path: ${oc.env:ROBOTWIN_ASSETS_PATH}
+    seeds_path: ${oc.env:REPO_PATH}/rlinf/envs/robotwin/seeds/eval_seeds.json
+    video_cfg:
+      save_video: True
+      video_base_dir: ${runner.logger.log_path}/video/eval
+
+actor:
+  model:
+    model_path: ${oc.env:VLA_CKPT_PATH}
