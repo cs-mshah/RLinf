@@ -35,7 +35,11 @@ export ROBOTWIN_PATH=${ROBOTWIN_PATH:-$HOME/OCEANDIR/projects/RoboTwin}
 export PYTHONPATH="${REPO_PATH}:${ROBOTWIN_PATH}:${PYTHONPATH:-}"
 
 # External paths — override in your submit env or .bashrc if different.
-export ROBOTWIN_ASSETS_PATH=${ROBOTWIN_ASSETS_PATH:-$ROBOTWIN_PATH/assets}
+# IMPORTANT: ROBOTWIN_ASSETS_PATH is the RoboTwin REPO ROOT, not the `assets/`
+# subdirectory. RoboTwin's own code (envs/utils/rand_create_cluttered_actor.py:22)
+# computes `BASE_DIR / "assets/..."` — if we pass `.../RoboTwin/assets` here it
+# doubles to `.../RoboTwin/assets/assets/...` and the loader crashes.
+export ROBOTWIN_ASSETS_PATH=${ROBOTWIN_ASSETS_PATH:-$ROBOTWIN_PATH}
 export VLA_CKPT_PATH=${VLA_CKPT_PATH:-$HOME/OCEANDIR/checkpoints/RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot}
 
 export EXPERIMENT_NAME="${SLURM_JOB_NAME}_${SLURM_JOB_ID}"
