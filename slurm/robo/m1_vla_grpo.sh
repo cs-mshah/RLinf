@@ -11,7 +11,7 @@
 #SBATCH --output=slurm/logs/%x_%j.out
 #SBATCH --error=slurm/logs/%x_%j.err
 
-source "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
+source "${SLURM_SUBMIT_DIR}/slurm/robo/_common.sh"
 
 python examples/embodiment/train_embodied_agent.py \
   --config-path=examples/embodiment/config/ \
