@@ -28,10 +28,14 @@ source "${REPO_PATH}/.venv/bin/activate"
 export EMBODIED_PATH="${REPO_PATH}/examples/embodiment/"
 export MUJOCO_GL=egl
 export HYDRA_FULL_ERROR=1
-export PYTHONPATH="${REPO_PATH}:${PYTHONPATH:-}"
+
+# RoboTwin repo — must be on PYTHONPATH; the RLinf install script does NOT
+# clone it (it only installs RoboTwin's pip-level deps: sapien, mplib, curobo).
+export ROBOTWIN_PATH=${ROBOTWIN_PATH:-$HOME/OCEANDIR/projects/RoboTwin}
+export PYTHONPATH="${REPO_PATH}:${ROBOTWIN_PATH}:${PYTHONPATH:-}"
 
 # External paths — override in your submit env or .bashrc if different.
-export ROBOTWIN_ASSETS_PATH=${ROBOTWIN_ASSETS_PATH:-$HOME/OCEANDIR/data/robotwin_assets}
+export ROBOTWIN_ASSETS_PATH=${ROBOTWIN_ASSETS_PATH:-$ROBOTWIN_PATH/assets}
 export VLA_CKPT_PATH=${VLA_CKPT_PATH:-$HOME/OCEANDIR/checkpoints/RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot}
 
 export EXPERIMENT_NAME="${SLURM_JOB_NAME}_${SLURM_JOB_ID}"
