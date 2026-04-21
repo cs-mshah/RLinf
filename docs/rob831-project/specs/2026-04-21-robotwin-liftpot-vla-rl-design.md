@@ -2,6 +2,7 @@
 
 **Course:** ROB 831 term project
 **Date:** 2026-04-21
+**Due date:** 2026-04-28 (hard — 7 days)
 **Author:** @HJoonKwon (with Claude as collaborator)
 **Status:** Draft — pending review
 
@@ -54,7 +55,7 @@ The term project asks for (a) three RL-algorithm baselines and (b) two proposed 
 | **M2a** | MLP-SAC + SE(3) | MLP | SAC | state | **Modification 2** — reward ablation on B2 |
 | **M2b** | VLA-GRPO + SE(3) | OpenVLA-OFT | GRPO | vision | **Modification 2** — reward ablation on M1 |
 
-**Seeds:** 3 for MLP runs (B1, B2, B3, M2a); 1 for VLA runs (B4, M1, M2b). The VLA cap is for compute, not principle — we acknowledge the single-seed variance in the writeup.
+**Seeds:** 1 per run, across both MLP and VLA rows. Chosen for time/compute economy given a term-project timeline; we acknowledge the single-seed variance honestly in the writeup rather than inflating the seed count for performative confidence intervals we wouldn't trust.
 
 **Key comparisons the plots will make:**
 1. B1 vs B2 vs B3 — which RL family wins from-scratch on this task?
@@ -68,43 +69,45 @@ The term project asks for (a) three RL-algorithm baselines and (b) two proposed 
 
 ### 4.1 B1 — MLP-PPO (on-policy, from scratch)
 
-- Policy: 2-layer MLP, hidden 256, tanh activation.
-- Action head: independent-std Gaussian (shared with SAC), tanh squashing with per-joint bounds from the PIPER ctrlrange (analogous to the RoboEval PR 2 fix).
-- Obs: state vector (proprioception 14 + pot 7 + target 7 + phase flags ≈ 30 dims).
-- Algorithm: PPO-GAE (γ=0.99, λ=0.95, clip=0.1, 16 update epochs, entropy bonus 0.01). Based on the tuned v2 RoboEval config, not a direct port.
-- Envs: 32 parallel train, 16 eval, horizon 200.
+- **Do not port RoboEval configs.** Instead, follow the conventions RLinf already uses for RL fine-tuning on RoboTwin / other embodied envs (obs dict format, action pre/post-processing, normalization, dimension ordering). The RoboEval integration in PRs 1–3 had bugs we don't need to inherit.
+- Policy: `rlinf/models/embodiment/mlp_policy` with the RLinf-standard construction (hidden dims from config, independent-std Gaussian, optional tanh squashing).
+- Action bounds: read from the PIPER ctrlrange exposed by the RoboTwin env (whatever RLinf's existing RoboTwin env adapter provides — don't hand-roll them).
+- Obs: state mode to be defined by §7 work; follow `rlinf/envs/<existing-state-env>` structure.
+- Algorithm knobs (starting point, tune in Phase 2): PPO-GAE γ=0.99, λ=0.95, clip ratio 0.1–0.2, update epochs 8–16, entropy bonus 0.01. Exact values follow RLinf's other PPO-on-state configs (e.g. `frankasim_ppo_mlp.yaml`) rather than RoboEval.
+- Envs: 32 parallel train, 16 eval, horizon 200. Adjust if the H100 allows more parallel envs without OOM.
 - Expected budget: ~2 h on 1× H100.
 
 ### 4.2 B2 — MLP-SAC (off-policy, from scratch)
 
-- Same policy architecture as B1 but with dual Q-heads (`add_q_head=True, add_value_head=False`), auto-tuned entropy (target_entropy = -action_dim = -14), τ=0.005.
-- Replay buffer size 1M transitions.
-- Model-to-env update ratio: 20 SAC updates per env step (standard).
-- `ignore_terminations=True` for infinite-horizon bootstrapping (RLinf convention).
+- Same principle: base on RLinf's existing SAC configs (e.g., `maniskill_sac_mlp.yaml` or `frankasim_sac_*.yaml`), not RoboEval.
+- Policy architecture: RLinf's MLP policy with `add_q_head=True, add_value_head=False`, auto-tuned entropy (`alpha_type: softplus`, `target_entropy = -action_dim`), τ=0.005.
+- Replay buffer, update ratio, `ignore_terminations`: use RLinf's SAC defaults.
 - Expected budget: ~4 h on 1× H100.
 
-### 4.3 B3 — MLP-MBPO (model-based, SAC + Dyna)
+### 4.3 B3 — MLP-MBPO (minimal Dyna-1, 7-day scope)
 
-This is the only baseline that requires new RLinf infrastructure.
+This is the only baseline that requires new RLinf infrastructure. Given the 7-day deadline we commit to a **minimal viable MBPO**: single dynamics model, horizon-1 synthetic rollouts (Dyna-1). The full MBPO (ensemble of 5, horizon-3 rollouts) is left as a stretch goal.
 
-**Algorithm (Janner et al. 2019, MBPO):**
+**Minimal algorithm:**
 1. Vanilla SAC collects real transitions → `D_real`.
-2. Every `M` env steps (500), retrain an **ensemble of N=5 MLP dynamics models** `f_φᵢ(s, a) → (Δs, r̂)` on `D_real`, with early-stopping on a held-out 10% split.
-3. At each env step, generate **k=3 synthetic rollouts** from random start-states in `D_real`, using one randomly-picked ensemble member per rollout, store in `D_model`.
-4. Train SAC on mixed batches: 95% from `D_model`, 5% from `D_real`.
+2. **Single** MLP dynamics model `f_φ(s, a) → (Δs, r̂)` — 2-layer MLP, hidden 256. Retrain every 500 env steps on `D_real`, early-stopping on a 10% held-out split.
+3. At each env step, generate **one 1-step synthetic transition** (Dyna-1) from a random real state; store in `D_model`.
+4. Train SAC on mixed batches: **95% from `D_model`, 5% from `D_real`** (Janner et al. 2019 §5; large model share is intentional — SAC's off-policy robustness absorbs model bias while real samples keep the Q-function grounded).
 
-**Why SAC as the base (not PPO):** Synthetic rollouts from a learned dynamics model are biased. Off-policy SAC tolerates bias because it reuses experience across many gradient steps without on-policy assumptions; PPO would need extra correction (importance weighting, trust-region adjustments) to handle model-generated data. SAC + Dyna is the standard pairing in the MBRL literature and stacks cleanly on top of B2 as a single-variable ablation.
+**Why SAC (not PPO) as the base:** Synthetic rollouts from a learned dynamics model are biased. Off-policy SAC tolerates bias because it reuses experience across many gradient steps without on-policy assumptions; PPO would need extra correction (importance weighting, trust-region adjustments). SAC + Dyna is the standard pairing in MBRL literature and stacks cleanly on top of B2 as a single-variable ablation.
+
+**Stretch upgrade (post-Day-4 if schedule allows):** add ensemble (N=5) and grow horizon to H=3 for a true MBPO.
 
 **New files:**
-- `rlinf/algorithms/mbpo/dynamics_ensemble.py` — ensemble MLP with `train_step`, `predict`, `compute_uncertainty`.
-- `rlinf/workers/actor/mbpo_worker.py` (or adapter on `sac_worker`) — model-training hook, synthetic buffer, mixed sampling.
+- `rlinf/algorithms/mbpo/dynamics_model.py` — single MLP dynamics with `train_step`, `predict` (API leaves room for ensemble extension).
+- **Modified:** the SAC worker — model-training hook, synthetic buffer, mixed sampling. Exact file located during Day 4 morning audit.
 - `examples/embodiment/config/robotwin_lift_pot_mbpo_mlp.yaml`.
 
-**Scope estimate:** ~400–500 LOC + config. 2–3 days.
+**Scope estimate:** ~200 LOC + config. 1 day including the SAC worker audit.
 
-**Risk:** SAC worker in RLinf may have assumptions (synchronous rollouts, specific replay interface) that resist a Dyna-style injection. Budget an audit of `sac_worker.py` before committing the interface. If the audit shows it's more invasive than expected (>1 week), fall back to a PPO-MBRL variant (document the deviation).
+**Risk (hard):** SAC worker in RLinf may have assumptions (synchronous rollouts, specific replay interface) that resist Dyna-style injection. **Mitigation:** if the Day-4-morning audit suggests the injection is >1 day of work, **drop B3 entirely** and document the descope. The project still has 2 RL baselines (PPO, SAC) — we'd note that MBRL requires infrastructure beyond 7-day scope.
 
-**Additional risk:** Learned dynamics on 14-DOF bimanual manipulation can be highly inaccurate — MBPO's success may be flat. A flat B3 curve is still a legitimate negative result for the course.
+**Additional risk:** Learned dynamics on 14-DOF bimanual manipulation with a single (non-ensemble) model will be inaccurate; MBPO's success rate may be flat or worse than B2. A flat B3 curve is still a legitimate negative result — we report it honestly.
 
 ### 4.4 B4 — VLA zero-shot (no RL)
 
@@ -131,7 +134,7 @@ The existing `robotwin_lift_pot_grpo_openvlaoft.yaml` assumes 8-GPU FSDP with gl
 | `max_epochs` | 1000 | 150 | enough to see trajectory, fits wall-time |
 | `val_check_interval` | 10 | 10 | unchanged |
 
-- Training backend: switch from FSDP to plain single-GPU DDP/pure torch.
+- Training backend: single-process, no FSDP, no DDP (DDP on a single GPU is a no-op).
 - Expected budget: ~8–12 h on 1× H100, 1 seed.
 - **Convergence risk:** smaller effective batch + fewer rollouts per GRPO step may harm convergence. We report the result honestly even if it fails to improve over B4.
 - If B4 is already >80% success, we reduce `max_epochs` further or skip M1 with documented reasoning.
@@ -168,8 +171,9 @@ The existing `robotwin_lift_pot_grpo_openvlaoft.yaml` assumes 8-GPU FSDP with gl
 
 **Reporting convention:**
 - Final numbers = mean of the **last 3 eval checkpoints** (avoid cherry-picking a lucky spike).
-- MLP runs: mean ± std across 3 seeds.
-- VLA runs: single-seed number with a footnote on the variance limitation.
+- All runs: single-seed number, with a footnote on the variance limitation. No seed-averaged error bars; instead we report per-eval variance across the 16 parallel eval envs as a within-run variability proxy.
+
+**Note on `pose_error_rot` as both metric and reward term:** `pose_error_rot` (SO(3) geodesic) appears here as a diagnostic and in §6 as part of the SE(3) reward. For the M2 comparisons this creates a Goodhart-like situation (we'd expect lower `pose_error_rot` on the runs whose reward includes it). That is the *point* of the reward ablation — the headline metric remains success rate, and `pose_error_rot` should be read as a mechanism-level diagnostic, not a fairness metric.
 
 **Plots for the writeup:**
 1. Success rate vs env steps — all 7 runs overlaid.
@@ -203,11 +207,17 @@ The existing `robotwin_lift_pot_grpo_openvlaoft.yaml` assumes 8-GPU FSDP with gl
 
 4. **Twist-space action smoothness** (if EE control is configurable) — replace joint-space smoothness with end-effector twist smoothness. For our joint-controlled setup, keep joint-space smoothness as a fallback.
 
-**Composite reward:**
+**Decisions on the optional terms:**
+- **Gripper-to-handle SE(3) alignment** (term 3): **include in the default SE(3) variant**. It's the most interesting geometric contribution; if the pose info isn't available for handles, we fall back to gripper-to-pot-centroid (which always exists).
+- **Twist-space action smoothness** (term 4): **exclude from the default**. Our control space is joint position, so joint-space smoothness remains the natural choice; twist-space smoothness is a follow-up idea for EE-control runs we aren't doing.
+
+**`subtask_progress` definition:** scalar in [0, 1] computed as `0.5 · (grasp_left_success + grasp_right_success) + 0.25 · 1[lift_distance > 5 cm]` — i.e., 0 before any grasp, 0.5 at single grasp, 1.0 once both handles are gripped and the pot is lifted 5 cm. This is computed inside the reward wrapper from the same phase-level signals exposed in §5.
+
+**Composite reward (SE(3) variant, `reward_variant: se3`):**
 ```
 r_SE(3) = - w_p  · ‖p_pot − p_target‖
          - w_R  · θ_geo(R_pot, R_target)
-         - w_ga · (‖ξ_left_gripper‖ + ‖ξ_right_gripper‖)   # optional
+         - w_ga · (‖ξ_left_gripper_to_handle‖ + ‖ξ_right_gripper_to_handle‖)
          + w_lift · max(0, lift_distance)
          + w_grasp · subtask_progress
          + w_success · 1[success]
@@ -216,7 +226,7 @@ r_SE(3) = - w_p  · ‖p_pot − p_target‖
 
 **Config knobs** (in env config YAML): `w_p`, `w_R`, `w_ga`, `w_lift`, `w_grasp`, `w_success`, `w_smooth`, plus `reward_variant: {default, se3}` to switch.
 
-**Default weights** (to tune empirically in Phase 3):
+**Default weights** (starting point, tune if needed):
 `w_p=1.0, w_R=0.3, w_ga=0.5, w_lift=5.0, w_grasp=2.0, w_success=10.0, w_smooth=0.1`.
 
 **Implementation scope:** ~150–200 LOC + config knobs. 1 day.
@@ -231,8 +241,8 @@ r_SE(3) = - w_p  · ‖p_pot − p_target‖
 |------|--------|
 | `rlinf/envs/robotwin/robotwin_env.py` | **Modify** — add `obs_mode: state` with proprioception + pot pose + target pose vector. Expose phase-level diagnostics in `infos`. |
 | `rlinf/envs/robotwin/lift_pot_reward_wrapper.py` | **New** — SE(3)/SO(3) reward wrapper (Modification 2). |
-| `rlinf/algorithms/mbpo/dynamics_ensemble.py` | **New** — MLP dynamics ensemble for B3. |
-| `rlinf/workers/actor/mbpo_worker.py` | **New** — SAC + Dyna training loop. |
+| `rlinf/algorithms/mbpo/dynamics_model.py` | **New** — single MLP dynamics model for B3 (minimal Dyna-1 variant). |
+| SAC worker file (located during Day-4 audit) | **Modify** — add dynamics training hook + synthetic buffer + mixed-batch sampling. |
 | `examples/embodiment/config/env/robotwin_lift_pot_state.yaml` | **New** — state-obs env config for MLP baselines. |
 | `examples/embodiment/config/robotwin_lift_pot_ppo_mlp.yaml` | **New** — B1 config. |
 | `examples/embodiment/config/robotwin_lift_pot_sac_mlp.yaml` | **New** — B2 config. |
@@ -274,7 +284,22 @@ HYDRA_FULL_ERROR=1
 
 ---
 
-## 9. SLURM plan
+## 9. Compute budget & SLURM plan
+
+**Compute budget** (1 seed per run, H100 80GB):
+
+| Run | GPUs | Wall time |
+|-----|------|-----------|
+| B1 MLP-PPO | 1 | ~2 h |
+| B2 MLP-SAC | 1 | ~4 h |
+| B3 MLP-MBPO | 1 | ~6 h |
+| B4 VLA zero-shot | 1 | ~0.5 h |
+| M1 VLA-GRPO (1-GPU LoRA) | 1 | ~8–12 h |
+| M2a MLP-SAC + SE(3) | 1 | ~4 h |
+| M2b VLA-GRPO + SE(3) | 1 | ~8–12 h |
+| **Total (sequential)** | | **~32–40 h** |
+
+**Binding constraint is the 7-day calendar**, not compute. We overlap implementation with training runtime (write B2 config while B1 trains, write SE(3) wrapper while B2 trains, etc.) to hit the April 28 deadline.
 
 **Reservations (yours):**
 - `ROBOcis220039p`: `robo-gh005`, 8× H100, active now through 2026-05-15.
@@ -307,53 +332,68 @@ VLA runs get `--gres=gpu:h100:1` too (with the scaled-down config) and `--time=1
 
 ---
 
-## 10. Phased plan with decision gates
+## 10. Day-by-day plan (7-day sprint, due 2026-04-28)
 
-### Phase 1 — "First, get B4 working" (1–2 days)
-1. Build `rlinf-openvlaoft` conda env.
-2. Download `RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot` checkpoint.
-3. Run B4 (eval only, 1× H100, ~30 min).
-4. Sanity checks: success rate > 0, eval videos sensible, metrics in tensorboard.
+Training is sequential on 1 GPU, so implementation work is overlapped with training runtime wherever possible.
 
-**Decision gate:**
-- B4 success > 80% → M1 headroom is small; reweight toward M2 experiments.
-- B4 success ∈ [20%, 80%] → M1 is the most interesting run; proceed as planned.
-- B4 success < 20% → investigate checkpoint / unnorm key / camera config before committing further compute. This is a debug gate, not a plan continuation.
+### Day 1 — Tue Apr 21: Env + B4
+- Verify SLURM partition / reservation (`sinfo -p ROBO`, `scontrol show reservation ROBOcis220039p`).
+- Build `rlinf-openvlaoft` conda env. Download SFT checkpoint.
+- Run **B4** (VLA zero-shot eval, ~30 min).
+- **Gate:** if B4 success < 20%, debug checkpoint / unnorm key / camera config before spending any more compute. If in the middle, proceed.
 
-### Phase 2 — "MLP baselines" (2–3 days)
-5. Implement state-obs mode in RoboTwin env wrapper (§7).
-6. Write B1/B2 configs (fresh, not ports).
-7. Run B1 × 3 seeds, B2 × 3 seeds.
+### Day 2 — Wed Apr 22: State obs + B1
+- Add state-obs mode to RoboTwin env wrapper (§7): proprioception + pot pose + target pose, expose phase diagnostics in `infos`.
+- Write B1 config using RLinf conventions (not RoboEval port).
+- Submit **B1** (~2 h).
+- While B1 trains: write B2 config.
 
-**Decision gate:** if both B1 and B2 are stuck at ≤5% success after 2× budgeted training time, the state features are probably inadequate — revisit §2's obs spec before moving on.
+### Day 3 — Thu Apr 23: B2 + SE(3) wrapper
+- Submit **B2** (~4 h).
+- While B2 trains: implement SE(3)/SO(3) reward wrapper (§6).
+- After B2 ends: submit **M2a** (~4 h).
 
-### Phase 3 — "The project contributions" (1–2 weeks)
-8. Implement SE(3)/SO(3) reward wrapper (§6).
-9. Run M2a (× 3 seeds) — pair with B2.
-10. Implement MBPO (§4.3). Budget checkpoint: 1 week max. If the SAC-worker audit shows MBPO needs >1 week of refactoring, fall back to documenting "MBRL on VLA fine-tuning is out of scope" and drop B3.
-11. Run B3 × 3 seeds.
-12. Run M1 × 1 seed (scaled-down 1-GPU VLA-GRPO).
-13. Run M2b × 1 seed.
+### Day 4 — Fri Apr 24: MBPO (simplest-viable) + B3
+- Implement **minimal MBPO**: single MLP dynamics model (not an ensemble), H=1 synthetic rollouts (Dyna-1), 95% model / 5% real mixing. Target ≤200 LOC, 1 day. If the `sac_worker.py` audit shows even this is >1 day of work, **drop B3** and accept a 2-algorithm baseline (document clearly in the report — "MBRL was scoped out due to repo integration cost").
+- Submit **B3** if implementation landed (~6 h); otherwise skip.
 
-### Phase 4 — Writeup
-14. Generate all plots via `scripts/plot_return.py`.
-15. Record eval videos for each run's final checkpoint.
-16. Write the project report referencing `docs/rob831-project/PRs/` for implementation notes.
+### Day 5 — Sat Apr 25: M1 (VLA-GRPO)
+- Write scaled-down 1-GPU VLA-GRPO config (§4.5).
+- Submit **M1** (~8–12 h). This is the longest training job; start it early in the day.
+- While M1 trains: start drafting the report (intro, methods sections can be written without final numbers).
+
+### Day 6 — Sun Apr 26: Buffer / M2b if time / plots
+- If M1 finished overnight and results look good: optionally submit **M2b** (~8–12 h). Otherwise **skip M2b** and report M2 comparison on the MLP side only (B2 vs M2a).
+- Generate plots from all completed runs (`scripts/plot_return.py`).
+- Record eval videos for each final checkpoint.
+
+### Day 7 — Mon Apr 27: Writeup
+- Finish the report: intro, related work (brief), methods per-row, results, discussion of negatives, conclusion.
+- Commit report to `docs/rob831-project/`.
+
+### Due Tue Apr 28: Submit.
+
+**Hard dropouts in priority order** (the moment the schedule slips):
+1. **M2b** (VLA × SE(3) reward) — first to drop; the M2 story stands on B2 vs M2a alone.
+2. **B3 (MBPO)** — drop if minimal Dyna-1 integration takes >1 day.
+3. **M1** — absolute last to drop since it's Modification 1's headline; if it has to go, the whole VLA+RL contribution collapses and we'd need to revisit scope with the instructor.
 
 ---
 
 ## 11. Risks & explicit descope points
 
-- **MBPO risk (B3):** if `sac_worker.py` is not Dyna-friendly, fall back to PPO-MBRL variant or drop B3 and document why. Budget 1 week max for the refactor.
+- **MBPO risk (B3):** if the Day-4 SAC-worker audit shows Dyna-style injection is >1 day of work, drop B3 and document. Course deliverable survives with 2 RL algorithms + clear justification.
 - **VLA convergence risk (M1):** single-GPU LoRA with small effective batch may fail to improve over B4. Honest report of the failure is acceptable for the course; also offer an "ideal M1 on 8 GPUs" as future work.
 - **Pot pose access risk:** if RoboTwin doesn't surface the pot pose cleanly, §6 reward wrapper has to reach into the sim — document the access path.
-- **Reservation conflict risk:** `ROBOcis220039p` ends 2026-05-15. If the project deadline is before then, all work fits. If deadline slips past 2026-05-24, secure a new reservation.
+- **Timeline risk:** 7 days is tight. Every decision gate in §10 prioritizes shipping working experiments over completeness.
+- **Reservation:** `ROBOcis220039p` is active through 2026-05-15, well past the 2026-04-28 deadline — no reservation-availability risk.
 
 **Hard descope order if time is tight** (drop from the bottom):
 1. M2b (VLA × SE(3) reward) — keep the VLA+RL result and MLP reward result, drop the combined cell.
-2. B3 (MBPO) — drop if the infra work is too heavy.
-3. A seed (MLP runs 3 → 2).
-4. M1 seed count is already 1; no further reduction.
+2. B3 (MBPO) — drop if the Phase 2 audit says the infra work is too heavy.
+3. M1 (VLA+GRPO fine-tune) — last to drop since it's the headline Modification 1 experiment.
+
+(We already commit to 1 seed per run, so there's no further seed reduction available.)
 
 ---
 
