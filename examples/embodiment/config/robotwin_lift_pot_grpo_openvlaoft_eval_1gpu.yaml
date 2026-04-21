@@ -39,7 +39,9 @@ runner:
 algorithm:
   normalize_advantages: True
   kl_penalty: kl
-  group_size: 1
+  # group_size > 1 required by validate_cfg for adv_type=grpo, even in eval-only mode.
+  # env.eval.group_size=1 still controls actual eval behavior (ungrouped rollouts).
+  group_size: 2
   rollout_epoch: 1
   eval_rollout_epoch: 1
   reward_type: action_level
