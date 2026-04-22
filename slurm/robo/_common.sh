@@ -45,10 +45,13 @@ export PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-egl}
 # For RoboTwin PIPER bimanual (14-DOF), ALOHA is the closest-fitting preset.
 export ROBOT_PLATFORM=${ROBOT_PLATFORM:-ALOHA}
 export HYDRA_FULL_ERROR=1
-# Force a per-job local Ray cluster — the ROBO node is shared with other
-# users who may have their own Ray clusters running; without this, Ray's
-# auto-discovery picks up multiple instances and the job aborts.
+# Force a per-job isolated Ray cluster. The ROBO node is shared; if two Ray
+# instances co-exist under /tmp/ray/sessions, Ray's state API aborts with
+# "Found multiple active Ray instances". Use a unique tmp dir per SLURM
+# job so each job has its own Ray session.
 export RAY_ADDRESS=local
+export RAY_TMPDIR="/tmp/ray_${SLURM_JOB_ID:-$$}"
+mkdir -p "${RAY_TMPDIR}"
 
 # RoboTwin repo — must be on PYTHONPATH; the RLinf install script does NOT
 # clone it (it only installs RoboTwin's pip-level deps: sapien, mplib, curobo).
