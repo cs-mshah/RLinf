@@ -45,6 +45,10 @@ export PYOPENGL_PLATFORM=${PYOPENGL_PLATFORM:-egl}
 # For RoboTwin PIPER bimanual (14-DOF), ALOHA is the closest-fitting preset.
 export ROBOT_PLATFORM=${ROBOT_PLATFORM:-ALOHA}
 export HYDRA_FULL_ERROR=1
+# Force a per-job local Ray cluster — the ROBO node is shared with other
+# users who may have their own Ray clusters running; without this, Ray's
+# auto-discovery picks up multiple instances and the job aborts.
+export RAY_ADDRESS=local
 
 # RoboTwin repo — must be on PYTHONPATH; the RLinf install script does NOT
 # clone it (it only installs RoboTwin's pip-level deps: sapien, mplib, curobo).

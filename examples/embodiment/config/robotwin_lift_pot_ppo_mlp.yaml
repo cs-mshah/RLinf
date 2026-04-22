@@ -105,6 +105,7 @@ rollout:
   pipeline_stage_num: 1
   model:
     model_type: "mlp_policy"
+    model_path: ""
     precision: "32"
 
 actor:
