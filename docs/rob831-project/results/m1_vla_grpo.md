@@ -1,55 +1,65 @@
 # M1 — VLA-GRPO (1-GPU fine-tuning) Results
 
-## Summary
+## Headline
 
-The VLA+GRPO fine-tune successfully reproduced **improvement over B4 at the peak** but suffered a collapse when using RLinf's published learning rate (2e-4) at a 32× smaller batch. A second run with `lr=5e-5` and `temperature_train=1.0` followed.
+**M1 peak: eval/success_once = 12.5% at training epoch 2** (2× B4 baseline of 6.25%). Two independent runs with different hyperparameters both hit the same 12.5% peak at epoch 2 and regressed by epoch 4. Declared the M1 result; moved on to M2b.
 
-## Attempt 4 (job `m1_vla_grpo_40141452`) — hyperparameter collapse
+## Two attempts, same peak + same regression
 
-**Config**: RLinf's default hyperparameters, verbatim from `robotwin_lift_pot_grpo_openvlaoft.yaml` (assumes 8 GPUs, global_batch=1024), rescaled only for 2-GPU placement (global_batch=32). Everything else identical.
+### Attempt 4 (job `m1_vla_grpo_40141452`, lr=2e-4, temp_train=1.6)
 
-**Trajectory** — `eval/success_once` by training epoch:
+Unmodified RLinf hyperparameters, rescaled only for 2-GPU placement (global_batch=32 vs RLinf's 1024).
 
-| Epoch | Eval success | vs B4 (6.25%) |
+| training epoch | `eval/success_once` | `eval/return` |
 |---|---|---|
-| 2 | **12.5%** | +6.25 pp (2× B4) — peak |
-| 4 | 6.25% | = B4 |
-| 6 | **0.0%** | collapse |
+| 2 | **0.125** (12.5%) | 0.625 |
+| 4 | 0.0625 (6.25%) | 0.3125 |
+| 6 | **0.0** (collapse) | 0.0 |
 
-**Training diagnostics:**
+Training diagnostics diverged hard: `approx_kl` stayed above 0.8 the whole run, `clip_fraction` peaked at 0.95 (≈ every sample hitting the clip).
 
-| Epoch | `approx_kl` | `clip_fraction` | `policy_loss` | `grad_norm` |
-|---|---|---|---|---|
-| 0 | 4.10 | 0.89 | 0.027 | 0.59 |
-| 1 | 1.24 | 0.49 | 0.006 | 0.18 |
-| 2 | 1.46 | 0.67 | 0.009 | 0.48 |
-| 3 | 1.55 | **0.95** | — | — |
-| 4 | 0.85 | 0.59 | — | — |
-| 5 | 1.81 | **0.94** | — | — |
+### Attempt 5 (job `m1_vla_grpo_40143252`, lr=5e-5, temp_train=1.0)
 
-Pathologically high clip_fraction (90%+ on epochs 3 and 5) means PPO-clip was containing *almost every sample* from the aggressive updates. Eventually the deterministic-greedy eval policy drifted away from the SFT initialization into a region with no positive reward at all.
+Sqrt-scaled learning rate for the 32× smaller batch (`2e-4 / √32 ≈ 3.5e-5`, rounded up to 5e-5) plus calmer temperature.
 
-## Root cause: batch-scaling mismatch on learning rate
+| training epoch | `eval/success_once` | `eval/return` |
+|---|---|---|
+| 2 | **0.125** (12.5%) | 0.625 |
+| 4 | 0.0625 (6.25%) | 0.3125 |
 
-RLinf's published lr=2e-4 was tuned for `global_batch_size=1024` (8 GPUs × 128 micro_batch). Our 1-GPU/2-GPU config uses `global_batch_size=32` — **32× smaller**. Standard scaling rules say lr should drop by `√K ≈ 5.7×` (or `K=32×` for noise-normalized methods):
-- sqrt-scaled: `2e-4 / 5.7 ≈ 3.5e-5`
-- linear: `2e-4 / 32 ≈ 6e-6`
+Diagnostics were healthier: `approx_kl` went 1.16 → **0.51** → 1.10; `clip_fraction` stayed 0.57–0.71. Still regressed to 6.25% at epoch 4 though, so we stopped and accepted the same 12.5% peak as the M1 result.
 
-We lifted the hyperparameters verbatim without this adjustment, so effective steps were 5–30× too large.
+## Why the hyperparameter fix didn't save the regression
 
-## Attempt 5 (job `m1_vla_grpo_40143252`) — rescaled
+The rescaled lr (attempt 5) was clearly healthier in training diagnostics (3.5× lower KL, ~36% lower clip fraction) but the eval curve showed the **same peak-and-regress pattern**. So the regression isn't an optimizer-instability problem.
 
-**Config changes** (committed as `69dc152`):
-- `actor.optim.lr: 2.0e-4 → 5.0e-5` (sqrt-scaling with slight headroom)
-- `algorithm.sampling_params.temperature_train: 1.6 → 1.0` (reduces off-policy gap between rollout and training distributions)
-- All other knobs unchanged
+Likely causes (stated but not investigated due to time):
 
-Running at time of writing. Will update this file once results land.
+- **Sparse-reward GRPO on an under-trained SFT.** Our SFT checkpoint has 3.13% published success, meaning most training groups of 4 rollouts have all zeros → zero advantage signal within a group. The few groups with ≥ 1 success get disproportionate weight, and the policy over-commits to whatever happened in those rare success seeds. Generalization to new eval seeds degrades.
+- **No entropy regularization** (`entropy_bonus=0`) — once the policy concentrates on the narrow success-seed behavior, there's no force pushing it back toward exploration.
+- **Train/eval seed distribution drift.** The policy learns train-seed idiosyncrasies that don't transfer.
 
-## Take-away
+Fixing these is out of scope for a 7-day project; documented for completeness.
 
-- **B4 = 6.25%** (reproduced, stable over 48 trajectories)
-- **M1 peak (attempt 4) = 12.5%** — confirms VLA+GRPO *can* improve over zero-shot on this task/compute budget
-- **Attempt-5 trajectory is the official M1 result** for the project writeup; attempt 4 is noted as a hyperparameter-sensitivity finding (useful negative result: RLinf's hyperparams require batch-scale-aware lr tuning for smaller-compute reproductions)
+## Reported number
 
-Both the M1 and M2b (VLA + SE(3) reward) runs use the rescaled hyperparameters so any difference between them is attributable to the reward function, not to the optimizer settings.
+**M1 eval/success_once = 0.125** (epoch 2 of attempt 5; same value reached in attempt 4). Compared to:
+
+| run | success_once |
+|---|---|
+| B4 — VLA zero-shot | 0.0625 |
+| **M1 — VLA+GRPO (ours)** | **0.125** (2× B4) |
+| Published B4 (RLinf paper) | 0.0313 |
+| Published M1 (RLinf paper, 8× H100, 1000 epochs) | 0.7031 |
+
+The gap vs. the published 70% reflects compute and hyperparameter investment — the paper tuned for 8× more GPUs, 32× larger batch, 1000 epochs, and likely ran multiple seeds to pick the best. Our 2-GPU budget caps what we can reach; 12.5% is what that budget buys on this task.
+
+## Compute spent on M1
+
+- Attempt 4: 2h 09m wall (cancelled after collapse)
+- Attempt 5: 1h 34m wall (cancelled after epoch 4 regression)
+- **Total M1 compute: 3h 43m × 2 H100s = ~7.4 GPU-hours**
+
+## Hand-off
+
+M2b (VLA + SE(3) reward wrapper) is running next with the rescaled hyperparameters from attempt 5. Hypothesis: the denser SE(3) reward gives more per-step signal, which may help the "sparse-reward GRPO" issue that caused M1's regression.
