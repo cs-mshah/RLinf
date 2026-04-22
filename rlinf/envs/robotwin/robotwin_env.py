@@ -53,6 +53,16 @@ class RoboTwinEnv(gym.Env):
         self.use_fixed_reset_state_ids = cfg.use_fixed_reset_state_ids
         self.use_custom_reward = cfg.use_custom_reward
 
+        # For MLP-from-scratch baselines (B1/B2/B3), the 14-D proprioception
+        # alone is not enough — the policy has no way to know where the pot is.
+        # When augment_state_with_pose=True, we append the pot's 6-D pose
+        # (xyz + quaternion, 7 dims) to the state vector, giving the MLP
+        # privileged state info. VLA policies (M1/M2b) don't need this; they
+        # see the pot directly through the camera.
+        self.augment_state_with_pose = bool(
+            OmegaConf.select(cfg, "augment_state_with_pose", default=False)
+        )
+
         # SE(3)/SO(3) reward variant (spec §6; Plan 1 Task 13, Case B wiring).
         # When reward_variant == "se3", RoboTwinEnv.step() recomputes the reward
         # per-env using compute_se3_reward_from_info() — RoboTwin is vectorized
@@ -208,6 +218,22 @@ class RoboTwinEnv(gym.Env):
         else:
             batch_wrist_images = None
         batch_states = torch.stack([torch.from_numpy(state) for state in batch_states])
+
+        # Optional privileged-state augmentation for MLP baselines.
+        # Appends pot pose (3 + 4 = 7 dims) per env, grabbed from the
+        # underlying sapien task. Total state: 14 (proprio) + 7 (pot) = 21.
+        if self.augment_state_with_pose:
+            extras = []
+            for sub_env in self.venv.envs:
+                try:
+                    pose = sub_env.task.pot.get_pose()
+                    p = np.asarray(pose.p, dtype=np.float32).reshape(3)
+                    q = np.asarray(pose.q, dtype=np.float32).reshape(4)
+                    extras.append(np.concatenate([p, q]))
+                except Exception:
+                    extras.append(np.zeros(7, dtype=np.float32))
+            pot_tensor = torch.from_numpy(np.stack(extras))
+            batch_states = torch.cat([batch_states, pot_tensor], dim=-1)
 
         extracted_obs = {
             "main_images": batch_images,

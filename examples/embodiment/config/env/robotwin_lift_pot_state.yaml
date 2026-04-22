@@ -1,0 +1,8 @@
+# Env variant: RoboTwin lift_pot with state-obs augmentation for MLP baselines.
+# Appends pot pose (xyz + quat, 7 dims) to the default 14-D proprioception →
+# final state vector is 21 dims, enough for from-scratch MLP to learn.
+
+defaults:
+  - robotwin_lift_pot
+
+augment_state_with_pose: true
