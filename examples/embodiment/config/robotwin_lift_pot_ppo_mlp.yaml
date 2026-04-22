@@ -18,7 +18,12 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor, env, rollout: 0      # MLP + sapien both fit on one H100
+    # Disaggregated across 2 GPUs (same pattern M1 used). Colocated actor+env+rollout
+    # on a single GPU had B1 attempt 3 crash in ActorGroup's collective init — same
+    # symptom as M1 attempt 1 (OOM-like from sapien + rollout + actor contention).
+    actor: 0
+    env: 0
+    rollout: 1
 
 runner:
   task_type: embodied

@@ -3,9 +3,9 @@
 #SBATCH --partition=ROBO
 #SBATCH --reservation=ROBOcis220039p
 #SBATCH --nodelist=robo-gh005
-#SBATCH --cpus-per-task=12
-#SBATCH --mem=64G
-#SBATCH --gres=gpu:h100:1
+#SBATCH --cpus-per-task=24
+#SBATCH --mem=128G
+#SBATCH --gres=gpu:h100:2
 #SBATCH --time=08:00:00
 #SBATCH -A cis220039p
 #SBATCH --output=slurm/logs/%x_%j.out
