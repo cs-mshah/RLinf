@@ -66,7 +66,7 @@ algorithm:
   rewards_upper_bound: 4.5
   sampling_params:
     do_sample: True
-    temperature_train: 1.6
+    temperature_train: 1.0      # matches M1 after M1's collapse
     temperature_eval: -1
     top_k: -1
     top_p: 1.0
@@ -136,7 +136,8 @@ actor:
     is_lora: True
     max_prompt_length: 512
   optim:
-    lr: 2.0e-4
+    # See M1 config for rationale: sqrt-scaled lr for 32x smaller batch.
+    lr: 5.0e-5
     value_lr: 1.0e-5
     adam_beta1: 0.9
     adam_beta2: 0.999

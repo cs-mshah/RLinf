@@ -70,7 +70,7 @@ algorithm:
   rewards_upper_bound: 4.5
   sampling_params:
     do_sample: True
-    temperature_train: 1.6
+    temperature_train: 1.0      # was 1.6; reduces off-policy gap between rollout and training distributions
     temperature_eval: -1
     top_k: -1
     top_p: 1.0
@@ -140,7 +140,12 @@ actor:
     is_lora: True
     max_prompt_length: 512
   optim:
-    lr: 2.0e-4
+    # lr scaled down from RLinf's 2e-4 (which assumed global_batch=1024).
+    # Our 1-GPU setup uses global_batch=32 (32x smaller), so sqrt-scaling
+    # gives ~3.5e-5; rounded up to 5e-5 for a slight head-start.
+    # Earlier 2e-4 caused M1 to collapse from 12.5% -> 0% over 6 epochs
+    # (clip_fraction hit 0.95, approx_kl stayed above 1.0).
+    lr: 5.0e-5
     value_lr: 1.0e-5
     adam_beta1: 0.9
     adam_beta2: 0.999
