@@ -19,7 +19,14 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor, env, rollout: 0
+    # Disaggregated across 2 H100s: actor (train) on GPU 0, rollout (inference)
+    # on GPU 1. Each holds its own ~14 GB bf16 copy of the VLA. Colocating all
+    # three on one GPU (as 'actor, env, rollout: 0') OOM'd during rollout-gen +
+    # actor-forward concurrency. Env shares GPU 0 — sapien's GPU footprint is
+    # small compared to the VLA.
+    actor: 0
+    env: 0
+    rollout: 1
 
 runner:
   task_type: embodied
