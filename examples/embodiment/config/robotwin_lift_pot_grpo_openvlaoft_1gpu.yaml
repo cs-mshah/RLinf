@@ -35,11 +35,11 @@ runner:
     project_name: rlinf
     experiment_name: "m1_vla_grpo_1gpu"
     logger_backends: ["tensorboard"]
-  max_epochs: 150
+  max_epochs: 50            # was 150; compute budget is the bind, not epochs
   max_steps: -1
   only_eval: False
-  val_check_interval: 10
-  save_interval: 10
+  val_check_interval: 2     # was 10; first eval at ~40 min, not ~7 h
+  save_interval: 5
   resume_dir: null
   ckpt_path: null
 
@@ -47,7 +47,7 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl
   group_size: 4                  # rescaled from 8
-  rollout_epoch: 8
+  rollout_epoch: 4               # was 8; halved for faster epoch turnaround
   eval_rollout_epoch: 1
   reward_type: action_level
   logprob_type: token_level
