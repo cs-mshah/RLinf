@@ -18,7 +18,11 @@ hydra:
 cluster:
   num_nodes: 1
   component_placement:
-    actor, env, rollout: 0
+    # Same 2-GPU split as M1. Colocating actor+rollout on 1 GPU OOM'd; spreading
+    # actor to GPU 0 and rollout to GPU 1 kept both under 70 GB/80 GB.
+    actor: 0
+    env: 0
+    rollout: 1
 
 runner:
   task_type: embodied
@@ -27,11 +31,11 @@ runner:
     project_name: rlinf
     experiment_name: "m2b_vla_grpo_se3_1gpu"
     logger_backends: ["tensorboard"]
-  max_epochs: 150
+  max_epochs: 50            # matches M1; early-stop on improvement
   max_steps: -1
   only_eval: False
-  val_check_interval: 10
-  save_interval: 10
+  val_check_interval: 2     # first eval at ~40 min
+  save_interval: 2          # save every eval for early-stop recovery
   resume_dir: null
   ckpt_path: null
 
@@ -39,7 +43,7 @@ algorithm:
   normalize_advantages: True
   kl_penalty: kl
   group_size: 4
-  rollout_epoch: 8
+  rollout_epoch: 4          # halved from 8; faster turnaround
   eval_rollout_epoch: 1
   reward_type: action_level
   logprob_type: token_level
