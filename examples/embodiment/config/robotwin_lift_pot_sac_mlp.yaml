@@ -35,6 +35,8 @@ runner:
   only_eval: False
   val_check_interval: 50
   save_interval: 100
+  seq_length: 1
+  max_prompt_length: 1
   resume_dir: null
   ckpt_path: null
 
@@ -77,12 +79,12 @@ algorithm:
     do_sample: True
     temperature_train: 1.0
     temperature_eval: 0.6
-    top_k: -1
+    top_k: 0
     top_p: 1.0
     repetition_penalty: 1.0
   length_params:
-    max_new_token: null
-    max_length: 128
+    max_new_token: 1
+    max_length: 1
     min_length: 1
 
 env:
@@ -122,6 +124,8 @@ rollout:
   enable_offload: False
   pipeline_stage_num: 1
   collect_prev_infos: True
+  enable_torch_compile: True
+  enable_cuda_graph: False
   model:
     model_type: "mlp_policy"
     model_path: ""
