@@ -39,7 +39,7 @@ runner:
   max_steps: -1
   only_eval: False
   val_check_interval: 2     # was 10; first eval at ~40 min, not ~7 h
-  save_interval: 5
+  save_interval: 2          # save every eval (for early-stop recovery); LoRA ckpts are ~200 MB each
   resume_dir: null
   ckpt_path: null
 
