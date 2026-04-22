@@ -69,6 +69,9 @@ The term project asks for (a) three RL-algorithm baselines and (b) two proposed 
 
 ### 4.1 B1 — MLP-PPO (on-policy, from scratch)
 
+**Algorithmic choice note (vs M1 = VLA-GRPO):** B1 uses PPO-clip with a learned value function + GAE; M1 uses GRPO with group-relative advantages. Both are in the PPO-clip family (same surrogate objective). They are not identical, but they are the *best-practice on-policy method for each policy class*: PPO's value-baseline advantage is more robust to the bootstrap phase of an MLP trained from random init (where a GRPO group of 4 rollouts would be uniformly ~0 reward → zero advantage signal), while GRPO's group-advantage shines on a pretrained VLA where rollout outcomes are varied. The writeup frames this as "best on-policy method per architecture" rather than strict algorithmic equivalence.
+
+
 - **Do not port RoboEval configs.** Instead, follow the conventions RLinf already uses for RL fine-tuning on RoboTwin / other embodied envs (obs dict format, action pre/post-processing, normalization, dimension ordering). The RoboEval integration in PRs 1–3 had bugs we don't need to inherit.
 - Policy: `rlinf/models/embodiment/mlp_policy` with the RLinf-standard construction (hidden dims from config, independent-std Gaussian, optional tanh squashing).
 - Action bounds: read from the PIPER ctrlrange exposed by the RoboTwin env (whatever RLinf's existing RoboTwin env adapter provides — don't hand-roll them).
