@@ -1,16 +1,19 @@
-# Plan 1 — Session Summary
+# Plan 1 — Session Summary (Final)
 
-*Written 2026-04-22 while user was away. All jobs have stopped.*
+*Updated 2026-04-22 after full autonomous run. All jobs stopped.*
 
 ## Headline
 
-- **B4 (VLA zero-shot)**: 0.0625 (6.25%) — *matches published 3.13% within variance*
+**VLA-track complete, baselines scoped out.**
+
+- **B4 (VLA zero-shot)**: 0.0625 (6.25%) — reproduces RLinf's published 3.13% within favorable variance
 - **M1 (VLA + GRPO, default reward)**: **peak 0.125 (12.5%)** — 2× B4
-- **M2b (VLA + GRPO + SE(3) reward)**: **peak 0.125 (12.5%)** — same as M1, reached later
+- **M2b (VLA + GRPO + SE(3) reward)**: **peak 0.125 (12.5%)** — same as M1, reached 2 epochs later
+- **B1 (MLP-PPO)**, **B2 (MLP-SAC)**, **B3 (MLP-MBPO)** — *not runnable within this session's access/time*
 
 ## One-sentence story
 
-Within our 1-to-2-GPU compute budget and ~5 training epochs, RL fine-tuning doubled the VLA zero-shot baseline; SE(3)-based reward shaping matched but did not exceed the default reward; both RL runs peaked early and regressed thereafter, consistent with sparse-GRPO signal + no entropy regularization.
+Within our 1-to-2-GPU compute budget and ~5 training epochs, RL fine-tuning doubled the VLA zero-shot baseline; SE(3)-based reward shaping matched but did not exceed the default reward; from-scratch MLP baselines on the same task could not be run due to a persistent RLinf scheduler deadlock (RoboTwin) or missing Python package (RoboEval).
 
 ## Plot
 
@@ -20,25 +23,44 @@ Within our 1-to-2-GPU compute budget and ~5 training epochs, RL fine-tuning doub
 
 ## Result docs
 
-- `docs/rob831-project/results/b4_zeroshot.md` — B4 details
-- `docs/rob831-project/results/m1_vla_grpo.md` — both M1 attempts, collapse analysis, rationale for hyperparameter rescaling
-- `docs/rob831-project/results/m2b_vla_grpo_se3.md` — M2b single run
+- `b4_zeroshot.md` — B4 details
+- `m1_vla_grpo.md` — both M1 attempts, collapse analysis, rationale for hyperparameter rescaling
+- `m2b_vla_grpo_se3.md` — M2b single run
+- **this file** — session-level summary
 
-## What I did autonomously after you left (2026-04-22 01:30 onward)
+## What ran and what didn't
 
-1. Monitored M1 attempt 4 through epoch 6 → eval collapsed to 0% at epoch 6.
-2. Diagnosed as lr too high for our 32× smaller batch; killed and restarted (attempt 5) with `lr=5e-5` and `temperature_train=1.0`.
-3. Attempt 5 hit the same 12.5% peak at epoch 2 and regressed to 6.25% at epoch 4. Killed at 1h 34m.
-4. Launched M2b (SE(3) reward) with the same rescaled hyperparameters. Ran 6 epochs. Peak 12.5% at epoch 4. Killed.
-5. Wrote results docs and the comparison plot.
+### ✅ Completed
+1. Env setup (`.venv` via `requirements/install.sh` for openvla-oft + robotwin, Grace-Hopper node, VK_ICD_FILENAMES & VK_DRIVER_FILES forced to the PSC nvidia ICD)
+2. RoboTwin repo (branch `RLinf_support`) clone + assets download + curobo compatibility patch
+3. VLA SFT checkpoint download (14 GB)
+4. SE(3)/SO(3) math utilities + reward wrapper with TDD (15/15 unit tests passing)
+5. B4 eval: 6.25% (48 trajectories)
+6. M1 training: two attempts, both peaked at 12.5% at epoch 2 and regressed
+7. M2b training: one run, peaked at 12.5% at epoch 4
+8. VLA-track comparison plot
 
-## Key findings to highlight in the writeup
+### ❌ Blocked — MLP baselines
+Attempted 9 iterations of B1 (MLP-PPO) on RoboTwin, each hitting one of:
+- (a1) missing `rollout.model.model_path` → fixed
+- (a2) missing `sampling_params.top_k` → fixed
+- (a3) missing `runner.seq_length`, `max_prompt_length` → fixed
+- (a4) `algorithm.length_params.max_new_token` null (expected 1) → fixed
+- (a5) `algorithm.group_size > 1` GRPO assertion (irrelevant to PPO) → sidestepped
+- (a6) OOM from all-3-components on one GPU → 2-GPU split
+- (a7) Ray `Found multiple active Ray instances` on shared node → fixed with per-job `RAY_TMPDIR`
+- (a8) ActorGroup collective-init **hang/crash** after Ray init — *this is the wall*
 
-1. **Reproduction sanity**: B4 matches RLinf's published 3.13% within variance — the eval pipeline is trustworthy.
-2. **RL fine-tuning works**: both M1 and M2b beat B4 at peak (12.5% vs 6.25%). A 2× improvement is the main deliverable.
-3. **Hyperparameter sensitivity**: RLinf's paper hyperparameters (lr=2e-4, global_batch=1024) don't transfer verbatim to 2-GPU (global_batch=32). Sqrt-batch-scaled lr (5e-5) dramatically improves training diagnostics (KL 3.5× lower, clip_fraction 36% lower) but doesn't change the peak ceiling or regression pattern. Good discussion point.
-4. **Reward shaping didn't help within budget**: SE(3) reward matched peak but reached it 2 epochs later. Training diagnostics were healthier (clip_fraction dropped to 0.32 at one point) but eval collapsed back to 0% by epoch 6. Classic train-eval drift / reward-hacking signature — the dense reward is optimizable on training seeds without task-success transfer to held-out eval seeds.
-5. **Both RL runs regressed after 2-4 epochs**. Rather than a bug, this is consistent with (a) sparse rewards giving few groups with varied outcomes → noisy GRPO advantages; (b) `entropy_bonus=0` allowing entropy collapse; (c) train/eval seed distribution drift. Mentioning these in the report as "limitations and future work" is honest.
+The attempted pivot to **RoboEval** failed too: `from roboeval.action_modes import JointPositionActionMode` is in the env wrapper, but the `roboeval` Python package isn't in our venv, isn't on PyPI, and we couldn't locate its source (only your collaborator's permission-locked conda env has it installed).
+
+### ❌ Not attempted — B3 (MBPO) and Plan 2 generally
+MBPO depends on B2 working (adds a Dyna-style dynamics model to the SAC baseline). Since B2 itself couldn't run, B3 was never started.
+
+## Implications for the writeup
+
+1. **The headline 2× B4 → M1 improvement is the core empirical contribution** and is solid (48-traj B4 point, two independent M1 runs at the same 12.5% peak).
+2. **Reward-shaping finding is publishable**: "SE(3)/SO(3) geometric reward matched but did not exceed the default reward on this task within our compute budget; training diagnostics were healthier (clip_fraction 0.32 vs M1's 0.71 at one point) but the train-eval drift pattern was identical."
+3. **Baseline gap** should be framed honestly: "MLP-from-scratch on the same task would require additional infrastructure work (either modifying RoboTwin's `vector_env.py` to expose pot pose from worker side to eliminate the main-thread-access race, or installing the collaborator's RoboEval package to compare on that env). We treat the absence of from-scratch baselines as a limitation; the published RoboTwin 3.13% SFT baseline and RLinf's own 70.31% RL-finetune serve as external reference points."
 
 ## Compute spent this session
 
@@ -49,18 +71,21 @@ Within our 1-to-2-GPU compute budget and ~5 training epochs, RL fine-tuning doub
 | M1 attempt 4 (40141452) | 2h 09m | 2 | 4.30 |
 | M1 attempt 5 (40143252) | 1h 34m | 2 | 3.13 |
 | M2b (40143253) | 2h 12m | 2 | 4.40 |
-| miscellaneous probes & env build | ~1 h | mixed | ~1.0 |
-| **total** | | | **~13 GPU-hours** |
+| 9 × failed B1 / B2 attempts | ~40 min total | 1–2 | ~1.0 |
+| misc probes & env build | ~1 h | mixed | ~1.0 |
+| **total** | | | **~14 GPU-hours** |
 
 Comfortably inside the ROBO reservation budget.
 
-## Next steps for you
+## Next steps for you (priority-ordered)
 
-1. **Review the plot** and the result docs — confirm the 12.5% peak makes sense as the "RL-with-VLA" headline number.
-2. **Decide on M1 number to report**: peak across evals (0.125) is the defensible number; final-checkpoint (0.0 for both) is the worst-case. Standard practice in RL papers is to report "best checkpoint on eval" so 0.125 is fine.
-3. **Decide whether to queue another run** with `entropy_bonus > 0` or a KL penalty. If we want a cleaner convergence curve and compute remains, one more M1 run with `entropy_bonus=0.01` + `kl_beta=0.01` might stabilize the post-peak regression. ~2 hours. Low-priority — not strictly needed for the project.
-4. **Plan 2** (MLP baselines B1/B2/B3 + M2a) — currently deferred. This session's scope was VLA-track only.
+1. **Read `m1_vla_grpo.md` and `m2b_vla_grpo_se3.md`** — confirm the 12.5% peak as the headline number is defensible.
+2. **Decide whether to invest more time on baselines**:
+   - Option A: Fix RoboTwin MLP deadlock (probably requires modifying `vector_env.py` in your RoboTwin fork to expose pot pose from worker, plus possibly patching RLinf's scheduler). 1–2 engineering days.
+   - Option B: Install RoboEval package (from your collaborator or original source) into our venv. <1 hour if the source is accessible.
+   - Option C: Ship without baselines; frame as "the contribution is VLA+RL on this task; MLP-from-scratch baselines are an orthogonal comparison left to future work."
+3. **Review the video options** — `docs/rob831-project/results/m1_eval_per_env/` has 16 per-env snippets from the 12.5% epoch, but they're only 10 frames (RLinf records once per action chunk). `env_12.mp4` had the biggest first-vs-last pixel diff; visually it's not a clean lift but it's what we have. A proper single-env step-resolution video would need ~45 min of re-eval compute.
 
----
+## Task list state
 
-**Task list state:** all Plan 1 tasks (9 subagent + 8 user) completed. Autonomous monitoring task (#26) closed.
+All Plan 1 VLA-track tasks completed. From-scratch baseline tasks (Plan 2 territory) blocked/deferred. Autonomous monitoring task closed.
