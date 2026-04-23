@@ -15,6 +15,13 @@
 
 Within our 1-to-2-GPU compute budget and ~5 training epochs, RL fine-tuning doubled the VLA zero-shot baseline; SE(3)-based reward shaping matched but did not exceed the default reward; from-scratch MLP baselines on the same task could not be run due to a persistent RLinf scheduler deadlock (RoboTwin) or missing Python package (RoboEval).
 
+## Reward-function note (important for reading the plots)
+
+- **RoboTwin reward (M1, M2b)**: sparse, 0 or 1 per step, scaled by `reward_coef=5.0`. Non-negative by construction. An episode return is effectively `5 × 1[success] × num_success_steps` — so failure episodes return ~0, success episodes return ≤ a few × 5.
+- **RoboEval reward (B1, B2, B3)**: dense shaped wrapper (`_LiftPotDenseRewardWrapper` in `rlinf/envs/roboeval/roboeval_env.py`). Contains negative penalty terms for reach distance, pose error, and action rate, plus positive terms for grasp progress, lift, and terminal success. A from-scratch policy that flails without progress accumulates very negative return (the B1 run shows `eval/return ≈ -1400`).
+
+**Consequence:** `eval/return` is not comparable across M1/M2b and B1/B2/B3. `eval/success_once` (fraction of eval envs that reached success) is the one metric that IS comparable. Had we used RoboTwin's sparse reward for B1/B2/B3 too, their returns would trivially be 0 until the policies learned to succeed — same story as the success_once curve, just zero-floored.
+
 ## Plot
 
 `docs/rob831-project/results/vla_track_success.png` — two subplots:
