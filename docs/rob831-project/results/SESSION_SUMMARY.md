@@ -7,9 +7,9 @@
 - **B4 (VLA zero-shot, RoboTwin)**: 0.0625 (6.25%) — reproduces RLinf's published 3.13% within favorable variance
 - **M1 (VLA + GRPO, default reward, RoboTwin)**: **peak 0.125 (12.5%)** — 2× B4
 - **M2b (VLA + GRPO + SE(3) reward, RoboTwin)**: **peak 0.125 (12.5%)** — same as M1, reached 2 epochs later
-- **B1 (MLP-PPO from scratch, RoboEval)**: ~0% sustained, one noise spike to 1.0 at checkpoint 79 then back to 0
-- **B2 (MLP-SAC from scratch, RoboEval)**: 0% across all 13 eval checkpoints so far
-- **B3 (MLP-MBPO from scratch, RoboEval)**: 0% sustained across 40 eval checkpoints (one noise spike among them), finished
+- **B1 (MLP-PPO from scratch, RoboEval)**: 0% sustained (mean-of-last-5 = 0.000) across 32 eval checkpoints; two isolated spikes to 1.0 (steps 79 and 269) that dropped immediately back to 0 — lucky-seed variance against the fixed 16-env eval pool. Cancelled at the 60-min watchdog after 3h 13m total.
+- **B2 (MLP-SAC from scratch, RoboEval)**: 0% across all 28 eval checkpoints. No spike. Cancelled at the watchdog after 2h 34m.
+- **B3 (MLP-MBPO from scratch, RoboEval)**: 0% sustained across 40 eval checkpoints (one isolated spike). Ran to completion at 24m, `eval/return` converged near -3 (policy learned the inaction-optimum — minimal actions to avoid the penalty terms — classic MBPO pathology when the dynamics model is imperfect).
 
 **One-sentence story:** Within a 14-GPU-hour compute budget, a VLA pretrained on this task family (OpenVLA-OFT SFT'd on lift_pot) fine-tuned with RL *doubles* zero-shot success (6.25 → 12.5%), while three RL-from-scratch MLP baselines (PPO, SAC, MBPO) fail to sustain any nonzero success rate — a clean demonstration that VLA pretraining is essential in this compute/data regime for a 14–16-DOF bimanual manipulation task.
 
@@ -77,15 +77,15 @@ These are **not** robust learning. They reflect:
 
 ## Plots
 
-- `docs/rob831-project/results/vla_track_success.png` — B4 vs M1 vs M2b on two subplots
-- Once B1/B2 finish (~2h more from last check), I'll generate `all_track_success.png` with all 6 curves on one `eval/success_once` plot (return plot split by env since they're not comparable).
+- `docs/rob831-project/results/vla_track_success.png` — B4 vs M1 vs M2b on two subplots (the VLA-only narrative)
+- `docs/rob831-project/results/all_tracks.png` — all 6 experiments on three panels: (1) success rate for all, (2) return for VLA track on RoboTwin, (3) return for MLP-from-scratch track on RoboEval. Return panels are split since the reward formulations are not comparable across envs.
 
 ## Result docs
 
 - `b4_zeroshot.md` — B4 details
 - `m1_vla_grpo.md` — both M1 attempts, collapse analysis, rationale for hyperparameter rescaling
 - `m2b_vla_grpo_se3.md` — M2b single run
-- `b1_b2_b3_mlp_scratch.md` — to be written after B1/B2 finish; will include training curves and the "lucky spike" variance analysis
+- `b1_b2_b3_mlp_scratch.md` — final numbers + "lucky spike" variance analysis, pathology analysis for B3's inaction-optimum convergence
 - **this file** — session-level summary
 
 ## Compute spent this session (so far)
@@ -96,8 +96,8 @@ These are **not** robust learning. They reflect:
 | M1 attempt 4 + attempt 5 | 3h 43m | 2 | 7.43 |
 | M2b | 2h 12m | 2 | 4.40 |
 | 9 × failed RoboTwin MLP B1 attempts | ~40 min | 1–2 | ~1.0 |
-| B1 (RoboEval PPO, still running) | 1h 32m+ | 2 | 3.06+ |
-| B2 (RoboEval SAC, still running) | 1h 14m+ | 2 | 2.47+ |
+| B1 (RoboEval PPO, watchdog-cancelled) | 3h 13m | 2 | 6.43 |
+| B2 (RoboEval SAC, watchdog-cancelled) | 2h 34m | 2 | 5.13 |
 | B3 (RoboEval MBPO, completed) | 24 min | 1 | 0.40 |
 | env builds, probes, installs | ~2 h | mixed | ~2.0 |
 | **total so far** | | | **~21 GPU-hours** |
