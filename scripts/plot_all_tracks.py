@@ -112,7 +112,7 @@ def main() -> None:
     ax.set_xlabel("training progress (normalized, 0 → 1)")
     ax.set_ylabel("success_once")
     ax.set_title("Success — env (line, dense) vs eval (markers, sparse)")
-    ax.set_ylim(-0.02, 1.05)
+    ax.set_ylim(-0.01, 0.20)
     ax.grid(alpha=0.3)
     ax.legend(fontsize=6.5, loc="upper right", ncol=1)
 
