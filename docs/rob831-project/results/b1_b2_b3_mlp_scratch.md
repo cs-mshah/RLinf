@@ -2,21 +2,35 @@
 
 ## Headline
 
-**All three from-scratch baselines fail to sustain any nonzero eval success rate** within their compute budgets. B1 and B3 each produced a single isolated checkpoint spike to 1.0 eval success that did not persist to adjacent checkpoints (classic lucky-seed variance against the fixed 16-env eval pool). B2 never showed any spike.
+**All three from-scratch baselines fail to sustain any nonzero eval success rate** within their compute budgets.
 
-Under the reporting convention of **mean of last 5 eval checkpoints**, all three baselines are at **0.000**.
+**Important correction (2026-04-24):** the single-checkpoint `eval/success_once = 1.000` spikes for B1 (steps 79, 269) and B3 (step 184704) are **NOT real successes — they are a RoboEval instrumentation artifact.** At those same checkpoints, `eval/return` is deeply negative (-220, -369, -7.6 respectively), which is impossible if 16/16 envs had actually succeeded under the dense reward: with `w_success = 10`, a real full success would yield `return ≈ +10 * 16 − penalties ≫ 0`. Root cause is an info-dict key mismatch — RoboEval's base env writes `info["task_success"]` (see `roboeval_env.py:481`), but RLinf's wrapper reads `info["success"]` both for the dense-reward success bonus (`rlinf/envs/roboeval/roboeval_env.py:77`) and for `success_once` aggregation (line 582). Combined with `LiftPot._success_check` being a class-level attribute defaulting to `True` (`lift_pot.py:26`) that `_on_reset` never clears, the `success_once` flag can latch true from stale state while the reward term silently stays 0. We did not fix and re-run (per decision 2026-04-24); the spikes should be disregarded as instrumentation noise.
+
+Under the reporting convention of **mean of last 5 eval checkpoints** — or training-rollout `env/success_once`, which is unaffected — all three baselines are at **~0**.
 
 ## Runs
 
 | id | algorithm | job | wall time | env steps reached | # eval checkpoints | max eval `success_once` | mean-of-last-5 eval | final eval `return` |
 |---|---|---|---|---|---|---|---|---|
-| B1 | MLP-PPO (RLinf) | 40177664 | 3h 13m (cancelled at watchdog) | 319 epochs | 32 | 1.000 (two isolated spikes at steps 79, 269) | **0.000** | -1882 |
-| B2 | MLP-SAC (RLinf) | 40177904 | 2h 34m (cancelled at watchdog) | 5600 epochs | 28 | 0.000 | **0.000** | -1022 |
-| B3 | MLP-MBPO (standalone Dyna-1) | 40178138 | 24m (full run, completed) | 200 000 env steps | 40 | 1.000 (one isolated spike) | **0.000** | -2.79 |
+| id | algorithm | job | wall time | # eval ckpts | max eval `success_once` | mean-of-last-5 eval | env `success_once` (training rollouts, unbiased) | final eval `return` |
+|---|---|---|---|---|---|---|---|---|
+| B1 | MLP-PPO (RLinf) | 40177664 | 3h 13m (cancelled at watchdog) | 32 | 1.000 ⚠️ *instrumentation bug* | **0.000** | peak 0.111 / last 0.053 (n=328) | -1882 |
+| B2 | MLP-SAC (RLinf) | 40177904 | 2h 34m (cancelled at watchdog) | 28 | 0.000 | **0.000** | peak 0.031 / last 0.000 (n=56) | -1022 |
+| B3 | MLP-MBPO (standalone Dyna-1) | 40178138 | 24m (full run, completed) | 40 | 1.000 ⚠️ *instrumentation bug* | **0.000** | (not logged) | -2.79 |
 
-## Variance / lucky-seed note (important!)
+The training-rollout column (`env/success_once`) is the more honest signal — it aggregates over *many* rollouts per checkpoint, and the info-dict key-mismatch bug only affected the eval code path. Even on this signal, none of the baselines hits even 12% and all drop back to near-zero.
 
-`use_fixed_reset_state_ids: True` means every eval uses the same 16 initial-state seeds. Combined with a low eval N = 16, a transient policy snapshot that happens to produce good behavior against a favorable subset of those seeds can produce a full 1.0 `success_once` even though adjacent checkpoints drop back to 0. B1 shows this pattern twice (steps 79 and 269), B3 once. The right summary is the mean of the last 5 (or last 10%) of eval checkpoints — not the max — which is 0 for all three.
+## Why the eval=1.0 spikes are NOT real successes (deleting the earlier "lucky-seed" framing)
+
+Earlier draft of this doc framed the spikes as low-N variance ("lucky seed against 16 fixed initial-state IDs"). That framing was wrong. Three pieces of evidence:
+
+1. **Internal inconsistency with return.** At B1 step 79, `eval/success_once = 1.000` but `eval/return = -220.30`. Dense reward has `w_success = 10` — a real 16/16 success would produce return ≳ `+160` per rollout batch before penalties. B1 step 269 is worse (return -368.70 at claimed 1.0 success). B3 step 184704: return -7.59 at claimed 1.0 success.
+
+2. **Info-dict key mismatch.** RoboEval's base `get_info()` writes `info["task_success"] = float(self.success)` (`roboeval_env.py:481`). RLinf's RoboEval wrapper reads `info.get("success", 0.0)` for the reward bonus (`rlinf/envs/roboeval/roboeval_env.py:77`) and `infos["success"]` for `success_once` aggregation (line 582). So the dense-reward success term is always 0, yet `success_once` somehow still latches True.
+
+3. **Stale class-attribute default.** `LiftPot._success_check = True` is a class-level attribute (`lift_pot.py:26`) that `_on_reset()` does not reset. When `success_once` reads through whatever code path DOES manage to put `"success"` in `infos` at eval time, it can read stale True from a previous episode's residue or the class default.
+
+The honest reading: eval `success_once` is unreliable on RoboEval under this wrapper; use `env/success_once` (training rollouts) instead, which is unaffected.
 
 ## What the return plot shows (the softer signal)
 

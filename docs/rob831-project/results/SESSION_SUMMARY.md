@@ -1,15 +1,15 @@
 # Plan 1 — Session Summary
 
-*Updated 2026-04-23, after B1/B2/B3 runs landed. B1 and B2 still in flight at writing time; numbers below are snapshots.*
+*Updated 2026-04-24 — corrected the B1/B3 "lucky-seed spike" framing: those `eval/success_once = 1.0` checkpoints are an instrumentation artifact (info-dict key mismatch in RoboEval wrapper), not lucky seeds. Corresponding `eval/return` at those same steps is deeply negative, internally inconsistent with real 16/16 success under `w_success = 10`. Not re-run; annotated only.*
 
 ## Headline
 
 - **B4 (VLA zero-shot, RoboTwin)**: 0.0625 (6.25%) — reproduces RLinf's published 3.13% within favorable variance
 - **M1 (VLA + GRPO, default reward, RoboTwin)**: **peak 0.125 (12.5%)** — 2× B4
 - **M2b (VLA + GRPO + SE(3) reward, RoboTwin)**: **peak 0.125 (12.5%)** — same as M1, reached 2 epochs later
-- **B1 (MLP-PPO from scratch, RoboEval)**: 0% sustained (mean-of-last-5 = 0.000) across 32 eval checkpoints; two isolated spikes to 1.0 (steps 79 and 269) that dropped immediately back to 0 — lucky-seed variance against the fixed 16-env eval pool. Cancelled at the 60-min watchdog after 3h 13m total.
-- **B2 (MLP-SAC from scratch, RoboEval)**: 0% across all 28 eval checkpoints. No spike. Cancelled at the watchdog after 2h 34m.
-- **B3 (MLP-MBPO from scratch, RoboEval)**: 0% sustained across 40 eval checkpoints (one isolated spike). Ran to completion at 24m, `eval/return` converged near -3 (policy learned the inaction-optimum — minimal actions to avoid the penalty terms — classic MBPO pathology when the dynamics model is imperfect).
+- **B1 (MLP-PPO from scratch, RoboEval)**: 0% sustained eval (mean-of-last-5 = 0.000) across 32 eval checkpoints. Two eval checkpoints report `success_once = 1.0` (steps 79, 269) but `eval/return` at those same steps is -220 and -369 — internally inconsistent with real 16/16 success (`w_success = 10` would yield return ≫ 0). These spikes are a **RoboEval instrumentation bug (info-dict key mismatch + stale class-attribute default), NOT lucky-seed variance.** Training-rollout `env/success_once` (unaffected by the bug) peaks at 11% and drops to 5%. Cancelled at 60-min watchdog after 3h 13m total.
+- **B2 (MLP-SAC from scratch, RoboEval)**: 0% eval across all 28 checkpoints; training-rollout env/success_once peaks at 3%. Cancelled at watchdog after 2h 34m.
+- **B3 (MLP-MBPO from scratch, RoboEval)**: 0% sustained eval across 40 checkpoints. One checkpoint reports `success_once = 1.0` with `eval/return = -7.6` — same instrumentation bug. `eval/return` converges near -3 (policy learned the inaction-optimum — minimal actions to avoid penalty terms — classic MBPO pathology when the dynamics model is imperfect). Ran to completion in 24m.
 
 **One-sentence story:** Within a 14-GPU-hour compute budget, a VLA pretrained on this task family (OpenVLA-OFT SFT'd on lift_pot) fine-tuned with RL *doubles* zero-shot success (6.25 → 12.5%), while three RL-from-scratch MLP baselines (PPO, SAC, MBPO) fail to sustain any nonzero success rate — a clean demonstration that VLA pretraining is essential in this compute/data regime for a 14–16-DOF bimanual manipulation task.
 
@@ -32,18 +32,15 @@ Why different envs: RoboTwin has a publicly-available VLA SFT checkpoint (`RLinf
 
 RoboTwin lift_pot (published SFT 3.13%) and RoboEval LiftPot (our dense reward) are both *hard* lift_pot tasks — a bimanual policy has to coordinate two arms to grip handles, lift, and maintain pose. The fact that the published RLinf number after 1000 epochs of 8-GPU RL training is 70% on RoboTwin indicates this is solvable but requires substantial compute. Our from-scratch MLPs at 400 / 8000 / 200k env-step budgets are nowhere near that investment. The conclusion "MLP from scratch can't do this in our budget" is therefore expected and reportable, not a bug.
 
-## Variance note on lucky-seed spikes (important!)
+## Note on the `eval/success_once = 1.0` spikes on RoboEval (important!)
 
-Several baseline eval checkpoints momentarily report `success_once = 1.0`:
-- B1 at checkpoint 79 (1.0), then 89/99/109 at 0.0
-- B3 at one spike among 40 evals, then 0.0 afterwards
+Several baseline eval checkpoints report `success_once = 1.0`:
+- B1 at step 79 (return -220) and step 269 (return -369)
+- B3 at step 184 704 (return -7.6)
 
-These are **not** robust learning. They reflect:
-1. Fixed eval seeds (`use_fixed_reset_state_ids: True` + 16-env pool). A transient policy snapshot happens to line up with a favorable initial-state pattern.
-2. Very low eval N = 16 → a single snapshot of 16/16 successes is not statistically different from "policy found one trick against this specific seed set".
-3. Subsequent checkpoints (where the policy has drifted slightly) drop back to 0.
+These are **not** lucky seeds and **not** real successes. Internal inconsistency proves it: under the dense reward with `w_success = 10`, 16/16 real successes would produce `eval/return ≳ +160 − penalties ≫ 0`, but the returns at these exact steps are deeply negative. See `b1_b2_b3_mlp_scratch.md` for the root-cause trace (info-dict key mismatch: RoboEval writes `info["task_success"]`, RLinf wrapper reads `info["success"]`; plus `LiftPot._success_check` is a class-level True default that `_on_reset` never clears). We did not fix and re-run (2026-04-24 decision).
 
-**Reporting rule we should use for the writeup:** report **mean of last 3 eval checkpoints** (or equivalently, mean over the final 10% of training). This eliminates spike artifacts and gives a stable "end of training" number. Max-over-training would overclaim.
+**Reporting convention:** for the writeup, use **(a) `env/success_once` from training rollouts** (unaffected by the eval-path bug, n=56–328 per run), and **(b) mean-of-last-5 eval** — not max. Both give ~0 for all three baselines. Max-over-training would overclaim and picks up the bugged spikes.
 
 ## Implications for the writeup
 
