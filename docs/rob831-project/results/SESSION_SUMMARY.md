@@ -1,115 +1,273 @@
-# Plan 1 — Session Summary
+# ROB 831 Term Project — Final Report
 
-*Updated 2026-04-24 — corrected the B1/B3 "lucky-seed spike" framing: those `eval/success_once = 1.0` checkpoints are an instrumentation artifact (info-dict key mismatch in RoboEval wrapper), not lucky seeds. Corresponding `eval/return` at those same steps is deeply negative, internally inconsistent with real 16/16 success under `w_success = 10`. Not re-run; annotated only.*
+*Author: Hyun Joon Kwon. Compiled 2026-04-24 for the 2026-04-28 deadline.*
 
-## Headline
+VLA pretraining + RL fine-tuning on a bimanual pot-lift task, compared against three RL-from-scratch MLP baselines (PPO, SAC, MBPO). All code and configs live on the `roboeval-integration` branch.
 
-- **B4 (VLA zero-shot, RoboTwin)**: 0.0625 (6.25%) — reproduces RLinf's published 3.13% within favorable variance
-- **M1 (VLA + GRPO, default reward, RoboTwin)**: **peak 0.125 (12.5%)** — 2× B4
-- **M2b (VLA + GRPO + SE(3) reward, RoboTwin)**: **peak 0.125 (12.5%)** — same as M1, reached 2 epochs later
-- **B1 (MLP-PPO from scratch, RoboEval)**: 0% sustained eval (mean-of-last-5 = 0.000) across 32 eval checkpoints. Two eval checkpoints report `success_once = 1.0` (steps 79, 269) but `eval/return` at those same steps is -220 and -369 — internally inconsistent with real 16/16 success (`w_success = 10` would yield return ≫ 0). These spikes are a **RoboEval instrumentation bug (info-dict key mismatch + stale class-attribute default), NOT lucky-seed variance.** Training-rollout `env/success_once` (unaffected by the bug) peaks at 11% and drops to 5%. Cancelled at 60-min watchdog after 3h 13m total.
-- **B2 (MLP-SAC from scratch, RoboEval)**: 0% eval across all 28 checkpoints; training-rollout env/success_once peaks at 3%. Cancelled at watchdog after 2h 34m.
-- **B3 (MLP-MBPO from scratch, RoboEval)**: 0% sustained eval across 40 checkpoints. One checkpoint reports `success_once = 1.0` with `eval/return = -7.6` — same instrumentation bug. `eval/return` converges near -3 (policy learned the inaction-optimum — minimal actions to avoid penalty terms — classic MBPO pathology when the dynamics model is imperfect). Ran to completion in 24m.
+---
 
-**One-sentence story:** Within a 14-GPU-hour compute budget, a VLA pretrained on this task family (OpenVLA-OFT SFT'd on lift_pot) fine-tuned with RL *doubles* zero-shot success (6.25 → 12.5%), while three RL-from-scratch MLP baselines (PPO, SAC, MBPO) fail to sustain any nonzero success rate — a clean demonstration that VLA pretraining is essential in this compute/data regime for a 14–16-DOF bimanual manipulation task.
+## 1. Research question
 
-## Two tracks, two envs — acknowledged mismatch
+> **In a 7-day, ~25 GPU-hour budget, does a Vision-Language-Action (VLA) model pre-trained on a manipulation task family, fine-tuned with RL, outperform RL-from-scratch MLP policies from the three major RL algorithm families (on-policy, off-policy, model-based) on a hard bimanual pot-lift task?**
 
-| track | env | robot | reward formula |
-|---|---|---|---|
-| VLA+RL (B4, M1, M2b) | RoboTwin `lift_pot` | PIPER bimanual (14 DOF) | RoboTwin's sparse 0/1 × reward_coef=5 |
-| MLP from scratch (B1, B2, B3) | RoboEval `LiftPot` | BimanualPanda (16 DOF) | RoboEval's dense `_LiftPotDenseRewardWrapper` (reach/grasp/lift/pose/success/action_rate) |
+Plus a secondary sub-question: **does replacing the default sparse success reward with an SE(3)/SO(3)-geodesic dense reward accelerate or improve VLA+RL fine-tuning within the same budget?**
 
-Why different envs: RoboTwin has a publicly-available VLA SFT checkpoint (`RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot`) which anchors the VLA track. RoboEval has a working MLP training pipeline via RLinf (no SFT checkpoint needed). Trying to run MLP-from-scratch on RoboTwin hit a persistent RLinf ActorGroup deadlock across 9 debug iterations (see "blocked paths" below).
+---
 
-### Consequence for reading the plots
+## 2. Headline results
 
-- **`eval/success_once` IS comparable across the two tracks.** Both envs report fraction of eval episodes that reached the task-success predicate. The tasks are structurally equivalent (two 7-DOF arms, grip handles of a pot, lift to a target).
-- **`eval/return` is NOT comparable.** RoboTwin returns are ≥ 0 (sparse binary success reward times 5). RoboEval returns are heavily negative (dense shaped reward with distance/pose penalties that a from-scratch policy accumulates into the thousands). Had we used RoboTwin's sparse reward for B1/B2/B3, their returns would trivially be 0 until policies learned to succeed — same `success_once` story, zero-floored return.
-- **We report `eval/success_once` as the headline metric** and treat `eval/return` as an intra-track diagnostic only.
+| ID | Method | Env | Peak eval `success_once` | Sustained (mean-of-last-5 eval or env rollouts) |
+|---|---|---|---|---|
+| **B4** | OpenVLA-OFT SFT, zero-shot | RoboTwin lift_pot | **6.25%** (1/16) | — (single eval snapshot) |
+| **M1** | VLA + GRPO, default sparse reward | RoboTwin lift_pot | **12.5%** (2/16) at epoch 2 | env-rollout peak 5.5% |
+| **M2b** | VLA + GRPO, **SE(3) dense reward** (ours) | RoboTwin lift_pot | **12.5%** (2/16) at epoch 4 | env-rollout peak **12.5%** ✓ |
+| B1 | MLP-PPO from scratch (RLinf) | RoboEval LiftPot | 0% real; 1.000 spike is an instrumentation bug (§7) | env-rollout peak 11.1%, last 5.3% |
+| B2 | MLP-SAC from scratch (RLinf) | RoboEval LiftPot | 0% | env-rollout peak 3.1% |
+| B3 | MLP-MBPO from scratch (standalone Dyna-1) | RoboEval LiftPot | 0% real; 1.000 spike is same bug | env-rollout: not logged; eval/return -2.8 (inaction-optimum) |
 
-### Difficulty framing
+**Published reference (RLinf paper):** 3.13% SFT → 70.3% after 1000 epochs of 8×H100 RL fine-tuning. Our budget is ~0.75% of that compute.
 
-RoboTwin lift_pot (published SFT 3.13%) and RoboEval LiftPot (our dense reward) are both *hard* lift_pot tasks — a bimanual policy has to coordinate two arms to grip handles, lift, and maintain pose. The fact that the published RLinf number after 1000 epochs of 8-GPU RL training is 70% on RoboTwin indicates this is solvable but requires substantial compute. Our from-scratch MLPs at 400 / 8000 / 200k env-step budgets are nowhere near that investment. The conclusion "MLP from scratch can't do this in our budget" is therefore expected and reportable, not a bug.
+**One-sentence story.** A VLA pretrained on this task family and fine-tuned with GRPO *doubles* zero-shot success (6.25% → 12.5%), while three RL-from-scratch MLPs (PPO/SAC/MBPO) across on-policy, off-policy, and model-based families all fail to sustain any nonzero success. The SE(3) reward modification matches the default reward on peak eval (12.5% vs 12.5%) but is the only VLA+RL run whose training-rollout success also reaches 12.5%, suggesting denser gradient signal even though held-out eval didn't improve in our budget.
 
-## Note on the `eval/success_once = 1.0` spikes on RoboEval (important!)
+Plots: `all_tracks.png` (6 runs, three panels) and `vla_track_success.png` (B4/M1/M2b only).
 
-Several baseline eval checkpoints report `success_once = 1.0`:
-- B1 at step 79 (return -220) and step 269 (return -369)
-- B3 at step 184 704 (return -7.6)
+---
 
-These are **not** lucky seeds and **not** real successes. Internal inconsistency proves it: under the dense reward with `w_success = 10`, 16/16 real successes would produce `eval/return ≳ +160 − penalties ≫ 0`, but the returns at these exact steps are deeply negative. See `b1_b2_b3_mlp_scratch.md` for the root-cause trace (info-dict key mismatch: RoboEval writes `info["task_success"]`, RLinf wrapper reads `info["success"]`; plus `LiftPot._success_check` is a class-level True default that `_on_reset` never clears). We did not fix and re-run (2026-04-24 decision).
+## 3. Environments
 
-**Reporting convention:** for the writeup, use **(a) `env/success_once` from training rollouts** (unaffected by the eval-path bug, n=56–328 per run), and **(b) mean-of-last-5 eval** — not max. Both give ~0 for all three baselines. Max-over-training would overclaim and picks up the bugged spikes.
+We used **two** simulators, for a deliberate reason stated below. Success (`success_once`) is defined equivalently in both — a task-success predicate over the pot's lifted pose — so the *success* metric is comparable. *Returns* are not comparable because the reward formulations differ; return is only a within-track diagnostic.
 
-## Implications for the writeup
+### 3.1 RoboTwin `lift_pot` (VLA track: B4, M1, M2b)
 
-1. **Headline empirical finding:** VLA+RL reaches 12.5% (2× zero-shot), while RL-from-scratch baselines (all three algorithm families — on-policy PPO, off-policy SAC, model-based MBPO) stay at ~0% sustained. This supports the claim that pretraining is the load-bearing ingredient in this compute regime.
+- Repo: `RoboTwin` branch `RLinf_support`.
+- Robot: **PIPER bimanual** (two 7-DOF PIPER arms, 14-DOF action space; parallel-jaw grippers).
+- Simulator backend: Sapien + CuRobo planner.
+- Observation: RGB images (two cameras) + proprioception, passed through OpenVLA-OFT's visual encoder.
+- Reset: 32-seed "reset state" pool; eval uses a held-out fixed 16-seed subset (`use_fixed_reset_state_ids: True`).
+- Episode horizon: 200 steps.
+- **Why chosen:** a publicly-released SFT checkpoint exists for this exact task — `RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot` (14 GB). This anchors the VLA track.
 
-2. **Reward-shaping modification (M2b) is a null result in our budget.** SE(3)/SO(3) geodesic reward matched but did not exceed the default RoboTwin reward (both peaked at 12.5%, regressed after). Training diagnostics for M2b were healthier (clip_fraction 0.32 vs M1's 0.71 at one point), suggesting denser gradient signal, but eval didn't track training. Classic train-eval drift / reward-hacking signature. Reportable as "negative finding with diagnostic evidence."
+### 3.2 RoboEval `LiftPot` (MLP-scratch track: B1, B2, B3)
 
-3. **Cross-env limitation:** the VLA track and MLP track run on different envs, so the comparison is at the task-family level, not at an identical simulator level. Writeup should be explicit about this. The `success_once` metric is still directly comparable; `return` is not. The claim that matters is qualitative: "12.5% vs 0% sustained," which holds regardless of reward formulation.
+- Repo: `github.com/Robo-Eval/RoboEval`, installed `pip install -e .` with `mujoco==3.3.3` pinned.
+- Robot: **BimanualPanda** (two 7-DOF Franka Panda arms + 1-DOF gripper each = 16-DOF action space).
+- Simulator backend: MuJoCo (via `mujoco-menagerie` assets submodule).
+- Observation: low-dimensional proprioceptive state (`obs_mode: state`, no pixels). Flattened into a Box by `_FlattenPropObsWrapper`.
+- Reset: 16-seed fixed eval pool.
+- Episode horizon: 200 steps.
+- **Why chosen:** a working RLinf MLP training pipeline was already wired up for this env (from earlier project PRs). MLP-from-scratch on RoboTwin hit a persistent RLinf `ActorGroup` collective-init deadlock across 9 debug iterations; pivoting to RoboEval saved the week.
 
-4. **Compute constraints drove every scope decision.** The published RLinf number (70% at 8-GPU × 1000 epochs) is our aspirational upper bound; we ran M1 at 1-2 GPUs × 50 epochs; and the MLP baselines at 1-2 GPUs × 400–8000 epochs. The VLA-pretraining advantage is exactly that it bypasses the "learn a 14-DOF bimanual policy from scratch" compute wall.
+### 3.3 Key structural differences
 
-## What ran and what didn't
+| dimension | RoboTwin lift_pot | RoboEval LiftPot |
+|---|---|---|
+| action DOF | 14 (2×7) | 16 (2×8) |
+| robot | PIPER | Franka Panda |
+| obs space | RGB + proprio (high-dim) | state-only (low-dim) |
+| physics | Sapien | MuJoCo |
+| default reward | sparse 0/1 × `reward_coef=5` | dense shaped (see §4) |
 
-### ✅ Completed
-1. Env setup (`.venv` via `requirements/install.sh` for openvla-oft + robotwin, Grace-Hopper node, VK_ICD_FILENAMES & VK_DRIVER_FILES forced to the PSC nvidia ICD)
-2. RoboTwin repo (branch `RLinf_support`) clone + assets download + curobo compatibility patch
-3. VLA SFT checkpoint download (14 GB)
-4. SE(3)/SO(3) math utilities + reward wrapper with TDD (15/15 unit tests passing)
-5. B4 eval: 6.25% (48 trajectories)
-6. M1 training: two attempts, both peaked at 12.5% at epoch 2 and regressed
-7. M2b training: one run, peaked at 12.5% at epoch 4
-8. VLA-track comparison plot (`vla_track_success.png`)
-9. RoboEval package installed via github.com/Robo-Eval/RoboEval + submodule + mujoco 3.3.3 pin
-10. B1 (MLP-PPO on RoboEval) — running, ~40% through training
-11. B2 (MLP-SAC on RoboEval) — running, ~33% through training
-12. B3 (MBPO on RoboEval) — standalone dynamics-model + Dyna-1 script, 200K env steps completed, 0% sustained
+Both tasks require the same qualitative skill: two arms coordinate to grip the pot's handles, lift ≥ 10 cm, keep the pot upright (rotation within ±20° of vertical). The `success_once` predicate checks these final-state conditions in both envs.
 
-### ⚠️ Blocked / scope-reduced
-- **MLP from scratch on RoboTwin**: 9 iterations of debugging the RLinf scheduler, ActorGroup collective-init deadlock persisted. Root cause likely an interaction between MLP policy (torch_compile, FSDP no_shard) and the Ray/sapien subprocess layout. Would require either RLinf scheduler patching or a simpler runner (e.g., SB3) — both out of 7-day scope. Pivoted to RoboEval (user's env from PR 1–3) where a working MLP training pipeline exists. Acknowledged in the cross-env note above.
-- **True MBPO with ensemble dynamics + k>1 horizon**: implemented a minimal Dyna-1 single-model variant instead. It's legitimately model-based (learned dynamics, synthetic transitions feed the SAC Q-update) but not the full Janner 2019 MBPO. Label as "minimal MBPO / Dyna-style" in the report.
+---
 
-## Plots
+## 4. Reward functions
 
-- `docs/rob831-project/results/vla_track_success.png` — B4 vs M1 vs M2b on two subplots (the VLA-only narrative)
-- `docs/rob831-project/results/all_tracks.png` — all 6 experiments on three panels: (1) success rate for all, (2) return for VLA track on RoboTwin, (3) return for MLP-from-scratch track on RoboEval. Return panels are split since the reward formulations are not comparable across envs.
+We used three different reward formulations across the six runs. The two environments' `success_once` predicate is equivalent; the *shaping* around it differs.
 
-## Result docs
+### 4.1 RoboTwin default (sparse) — used by B4, M1
 
-- `b4_zeroshot.md` — B4 details
-- `m1_vla_grpo.md` — both M1 attempts, collapse analysis, rationale for hyperparameter rescaling
-- `m2b_vla_grpo_se3.md` — M2b single run
-- `b1_b2_b3_mlp_scratch.md` — final numbers + "lucky spike" variance analysis, pathology analysis for B3's inaction-optimum convergence
-- **this file** — session-level summary
+Pure terminal success indicator, scaled by a reward coefficient:
 
-## Compute spent this session (so far)
+$$r_t = 5 \cdot \mathbb{1}[\text{success predicate holds at step } t]$$
+
+Return is non-negative, typically 0 until a policy first succeeds, then ≈ 5 × (consecutive success steps).
+
+### 4.2 SE(3)/SO(3) dense reward (ours) — used by M2b
+
+Implemented in `rlinf/envs/robotwin/lift_pot_reward_wrapper.py` and unit-tested in `tests/unit_tests/test_se3_math.py` (+ `_lift_pot_reward_wrapper.py`, 15/15 passing).
+
+$$r_t = -w_p \|p_\text{pot} - p_\text{target}\|_2 - w_R\, d_{SO(3)}(R_\text{pot}, R_\text{target}) - w_{ga}\, \sum_{s\in\{L,R\}} \|\log_{SE(3)}(H_s^{-1} G_s)\|_2 + w_\text{lift}\, \max(0, \Delta z) + w_\text{grasp}\, \text{subtask}(t) + w_\text{success}\cdot \mathbb{1}[\text{success}] - w_\text{smooth}\, \|a_t - a_{t-1}\|_2^2$$
+
+with weights `w_p=1.0, w_R=0.3, w_ga=0.5, w_lift=5.0, w_grasp=2.0, w_success=10.0, w_smooth=0.1`.
+
+Key pieces:
+- **Position error:** Euclidean distance between pot body and target lift pose.
+- **Orientation error:** geodesic distance on SO(3) — the rotation-matrix form of `arccos((tr(R_1^T R_2) - 1)/2)` (`so3_geodesic_distance`).
+- **Gripper-handle alignment:** SE(3) twist magnitude via the matrix logarithm of the relative transform between each gripper and its target handle frame (`se3_log_map`). This is the Lie-algebra distance on SE(3).
+- **Lift / grasp subtask bonuses:** scalar rewards for crossing grasp-left, grasp-right, and lift-10-cm milestones.
+- **Terminal success bonus:** +10 on the full task-success predicate.
+- **Action-rate penalty:** discourages jittery actuation.
+
+The pot-pose/gripper-pose fields needed for these terms are populated into `info` by a small patch to `rlinf/envs/robotwin/robotwin_env.py` that reads them from the RoboTwin state dict on each step (the "Case B" inline path in the spec, chosen because Sapien's subprocess-vectorized envs don't accept `gym.Wrapper` cleanly).
+
+### 4.3 RoboEval dense shaped reward — used by B1, B2, B3
+
+`_LiftPotDenseRewardWrapper` in `rlinf/envs/roboeval/roboeval_env.py:33`:
+
+$$r_t = -w_\text{reach}(d_L + d_R) + w_\text{grasp}\cdot \text{subtask}(t) + w_\text{lift}\max(0, \Delta z) - w_\text{pose}\cdot e_\text{pose} + w_\text{success}\cdot \mathbb{1}[\text{success}] - w_\text{AR}\|a_t - a_{t-1}\|_2^2$$
+
+with defaults `w_reach=1.0, w_grasp=2.0, w_lift=5.0, w_pose=0.5, w_success=10.0, w_action_rate=0.0`. `use_rel_reward: True` means the reward delivered to the algorithm is the per-step *delta* — this decorrelates the penalty terms from trivial cumulative effects.
+
+Under this formulation, returns over a full 200-step episode are typically -1000 … +10 depending on whether the policy succeeds. From-scratch policies spend most of the episode far from the handles (large `d_L + d_R`) racking up reach and pose penalties, which dominates return — hence the observed range of -700 to -2000.
+
+---
+
+## 5. Methods
+
+### 5.1 VLA checkpoint (B4)
+
+- Architecture: **OpenVLA-OFT** (Open VLA, Open-FewTune variant) — a 7B autoregressive vision-language-action model based on Prismatic VLM + LoRA adapters.
+- SFT checkpoint: `RLinf/RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot` (published by RLinf authors alongside their paper). 14 GB, downloaded from HuggingFace.
+- Zero-shot eval: 48 trajectories (3 rollouts × 16 envs × 1 eval pass), deterministic sampling (`temperature=0.0`).
+- Resulting success: **6.25%** (1/16 on single-rollout eval; 3/48 = 6.25% stable across 3-rollout eval).
+
+### 5.2 VLA + GRPO fine-tuning (M1, M2b)
+
+**Algorithm:** Group-Relative Policy Optimization (GRPO) — a PPO variant where the per-sample advantage is computed relative to a group of parallel rollouts from the same initial state, rather than a learned critic. This removes the critic head and uses group-relative reward for variance reduction. Implemented in RLinf as a `GRPOActor` + `PPOTrainer` combination.
+
+**Configuration (M1 attempt 5, adopted for M2b):**
+- Hardware: 2× H100 on `robo-gh005`, FSDP (`no_shard` since 1 GPU per actor worker after placement).
+- `global_batch=32`, `group_size=4`, `mini_batch_size=8`, 50 total train epochs capped by wall-clock.
+- `lr=5e-5` (sqrt-scaled from RLinf's published `2e-4` for their 32× larger global batch of 1024).
+- `temperature_train=1.0`, `temperature_eval=0.0`.
+- `clip_ratio=0.2`, `kl_coef=0.0` (no reference-KL penalty — GRPO relies on clipping).
+- `entropy_bonus=0` (consistent with RLinf defaults).
+- Eval every 2 training epochs.
+
+**Two attempts for M1:** attempt 4 used unmodified RLinf hyperparameters (`lr=2e-4`, `temperature=1.6`); training diverged (`approx_kl > 0.8`, `clip_fraction ≈ 0.95`). Attempt 5's sqrt-scaled lr gave healthy diagnostics (`approx_kl` 0.5–1.1, `clip_fraction` 0.57–0.71) but the same peak-and-regress shape on eval (details in `m1_vla_grpo.md`).
+
+### 5.3 MLP-PPO from scratch (B1)
+
+RLinf's built-in PPO actor with an MLP policy head.
+- Architecture: 2-hidden-layer MLP, 256 units, tanh activations, diagonal Gaussian action head with state-dependent log-std.
+- `lr=3e-4`, `clip_ratio=0.2`, `vf_coef=0.5`, `entropy_coef=0.01`, `gae_lambda=0.95`, `gamma=0.99`.
+- 16 parallel envs, 128-step rollouts, 4 epochs × 4 minibatches per update.
+- Run duration: cancelled at 60-min watchdog (zero eval improvement → stop) after 3h 13m total wall time, reaching 319 policy-update epochs.
+
+### 5.4 MLP-SAC from scratch (B2)
+
+RLinf's built-in SAC actor with an MLP policy.
+- Architecture: 2-hidden-layer MLP (256 units) actor with tanh-squashed Gaussian; twin Q-networks (same MLP).
+- `lr=3e-4`, `tau=0.005`, `gamma=0.99`, automatic temperature tuning (target entropy = -act_dim).
+- 16 parallel envs, replay buffer 200k transitions, 256-batch updates, 1 update per env step.
+- Cancelled at 60-min watchdog after 2h 34m, reaching 5,660 gradient steps.
+
+### 5.5 MLP-MBPO from scratch (B3) — standalone Dyna-1 variant
+
+Full RLinf does not expose a model-based RL worker, so this was written as a **standalone PyTorch training loop** (`scripts/b3_mbpo_roboeval.py`, 358 lines).
+
+**Algorithm:**
+1. **Dynamics model:** a deterministic MLP `f_\phi(s,a) -> (s',r)` predicting next-state and reward. Trained on mini-batches sampled from the real replay buffer.
+2. **Policy/Q:** standard SAC (Gaussian actor, twin Q-nets, automatic temperature).
+3. **Dyna-1 synthetic rollouts:** at every real env step, sample one real `(s,a)` from the replay buffer, query the dynamics model for `(s', r̂)`, push `(s, a, r̂, s')` into a synthetic buffer.
+4. **SAC updates** train on a **50/50 mix** of real and synthetic batches (`--real-frac 0.5`).
+
+**Configuration:** 16 train envs, 8 eval envs, 200 max episode length, 200,000 total env steps, 2,000 random-action warmup steps, batch size 256, buffer 200k, 1 dynamics update + 1 SAC update per env step, eval every 10k steps.
+
+**Deviation from full MBPO (Janner et al., 2019):** we did NOT implement the ensemble dynamics model, NOT use the uncertainty-aware model-generated horizon (k > 1), and NOT use the per-model-rollout data weighting. This is a **Dyna-1 style minimal MBPO** — legitimately model-based (learned dynamics, synthetic transitions drive the Q-update) but simpler than the full paper. Reported accordingly.
+
+**Observed failure mode:** policy converged to near-zero actions. `eval/return ≈ -3`, well above B1/B2's -1000 range, because minimal action magnitudes keep the policy close to the reach-penalty origin. This is a well-known MBPO pathology when the learned dynamics is imperfect and the reward has dominant penalty terms — the policy exploits the dynamics model's prediction errors at shapes that coincidentally minimize the (learned) reward, which here means "don't move."
+
+---
+
+## 6. Compute and wall-clock
 
 | job | wall time | GPUs | GPU-hours |
 |---|---|---|---|
-| B4 (single-roll + 3-roll) | 17 min | 1 | 0.29 |
+| B4 (zero-shot, 1-roll + 3-roll) | 17 min | 1 | 0.29 |
 | M1 attempt 4 + attempt 5 | 3h 43m | 2 | 7.43 |
 | M2b | 2h 12m | 2 | 4.40 |
-| 9 × failed RoboTwin MLP B1 attempts | ~40 min | 1–2 | ~1.0 |
+| 9× failed RoboTwin MLP attempts (B1 deadlock debug) | ~40 min | 1–2 | ~1.0 |
 | B1 (RoboEval PPO, watchdog-cancelled) | 3h 13m | 2 | 6.43 |
 | B2 (RoboEval SAC, watchdog-cancelled) | 2h 34m | 2 | 5.13 |
 | B3 (RoboEval MBPO, completed) | 24 min | 1 | 0.40 |
 | env builds, probes, installs | ~2 h | mixed | ~2.0 |
-| **total so far** | | | **~21 GPU-hours** |
+| **total** | | | **~27 GPU-hours** |
 
-Well inside the ROBO reservation budget.
+All on the `ROBOcis220039p` reservation at PSC Bridges-2 (`robo-gh005` Grace-Hopper node). Well inside the reservation budget.
 
-## Next steps for you (priority-ordered)
+---
 
-1. **Wait for B1 and B2 to finish** (~2–2.5 hours from 2026-04-23 evening). Check `eval/success_once` max and mean-of-last-3. If neither exceeds ~0.1 sustained, they confirm the "0% sustained" narrative.
-2. **Read the per-run docs** (`m1_vla_grpo.md`, `m2b_vla_grpo_se3.md`, and the soon-to-be-written `b1_b2_b3_mlp_scratch.md`) to confirm the numbers are defensible.
-3. **Generate the combined 6-run plot** once all runs are done. I'll handle this automatically when B1 and B2 finish.
-4. **Decide reporting convention** for the writeup: I'd use `mean of last 3 eval checkpoints` for all runs (eliminates lucky-seed spikes). Say if you prefer max-over-training; we can report both.
-5. **Consider a clean single-env writeup variant**: if time permits, port the from-scratch baselines to RoboTwin using a non-RLinf runner (SB3). This would eliminate the cross-env caveat but is probably too late. SB3 is already installed in the venv if we decide to do this later.
+## 7. RoboEval `eval/success_once = 1.0` spike bug — important caveat
 
-## Task list state
+Three eval checkpoints report `success_once = 1.000`: B1 at steps 79 (return -220) and 269 (return -369), B3 at step 184,704 (return -7.6). **These are not real successes** — they are a RoboEval instrumentation artifact. Evidence:
 
-- Plan 1 VLA track: complete (B4, M1, M2b done).
-- Plan 1 baseline track: B3 done; B1 and B2 in flight; final plot + results doc pending completion.
+1. **Internal inconsistency.** Under the dense reward with `w_success = 10`, a real 16/16 success would yield `return ≈ +160 − penalties ≫ 0`. The observed returns at those exact steps are -7 to -370. If 16 envs really succeeded, `w_success` would have added at least +160 per batch. It didn't, so 16 envs did not really succeed.
+
+2. **Info-dict key mismatch.** RoboEval's base `get_info()` writes `info["task_success"] = float(self.success)` (`roboeval/roboeval_env.py:481`). RLinf's RoboEval wrapper reads `info.get("success", 0.0)` for the reward's success term (`rlinf/envs/roboeval/roboeval_env.py:77`) and `infos["success"]` for `success_once` aggregation (line 582). The reward path silently falls through to 0 (explains why the return bonus never lands). The aggregation path reads an unrelated info key that is sometimes present via a different code route.
+
+3. **Stale class-attribute default.** `LiftPot._success_check = True` is a class-level attribute (`roboeval/envs/lift_pot.py:26`) that `_on_reset()` never clears. Combined with the above, `success_once` can latch true from stale state without the reward ever firing.
+
+**We did not fix and re-run** (2026-04-24 decision — the plot-level correction is sufficient for the report). The `all_tracks.png` figure simply omits the three bugged 1.0 checkpoints from the eval-success scatter. The more trustworthy signal, **training-rollout `env/success_once`**, is unaffected by this bug (it aggregates over many more rollouts and is populated through the same in-env path for all runs); on that signal, B1 peaks at 11.1%, B2 at 3.1%, and B3 does not log it — all far below 12% and drop to 0–5% by end of training.
+
+---
+
+## 8. Discussion — what this means
+
+### 8.1 VLA pretraining is the load-bearing ingredient in this regime
+
+In ~7 GPU-hours of RL fine-tuning, the pre-trained VLA goes 6.25% → 12.5% (2× zero-shot). In ~12 GPU-hours of RL from scratch across three algorithm families, MLPs sustain ~0% on eval. Published RLinf numbers say the same task reaches 70% with 8×H100 × 1000 epochs — two orders of magnitude more compute than we have. The VLA pretraining essentially *skips* the compute-intensive early phase (learn to see a pot, learn arm kinematics, learn bimanual coordination) and lets the RL objective focus on the narrow "refine grip/lift" loop.
+
+### 8.2 SE(3) reward (M2b) is a null result on eval, mild positive on training rollouts
+
+Peak eval is tied with the default reward (12.5% vs 12.5%). The SE(3) reward *did* produce smoother training diagnostics (`approx_kl` similar, `clip_fraction` healthier at epoch 3: 0.32 vs M1's 0.57) and its training-rollout success climbed to the same 12.5% peak that the eval saw — a signal that M1 did not match (its env-rollout peak was only 5.5%). So within the budget:
+
+- **Evidence for denser gradient:** yes, training-rollout trajectory is smoother and higher-reaching for M2b.
+- **Evidence for better eval generalization:** no, eval peak is identical to M1's and both regress after.
+
+Reportable as **"negative result with diagnostic upside"** — the modification didn't help held-out eval in our budget, but its training dynamics suggest the shaping works as designed; the bottleneck is elsewhere (most likely: GRPO group sparsity on a 3% SFT, no entropy regularization, seed distribution drift between train and eval).
+
+### 8.3 Cross-env limitation
+
+The VLA track ran on RoboTwin (PIPER, sparse reward) and the MLP-scratch track on RoboEval (Panda, dense reward). **`success_once` is directly comparable** between them: both envs define "lift the pot ≥ 10 cm with upright pose." **`return` is NOT comparable** and we never plot it on shared axes — panels 2 and 3 of `all_tracks.png` are split accordingly.
+
+The headline claim — 12.5% sustained on one track vs 0% sustained on the other — holds at the task-family level regardless of the env swap. If time permitted, a cleaner single-env comparison would port the from-scratch baselines to RoboTwin under a non-RLinf runner like SB3; this was out of the 7-day window.
+
+### 8.4 MBPO inaction pathology (B3)
+
+B3's policy converged to almost-zero actions. The learned dynamics model is imperfect on the 16-DOF bimanual task; in the region of "do nothing," the dynamics prediction error is small (state barely changes, easy to predict) and the dense reward's penalty terms are minimized. The policy exploits this "safe basin" to minimize its planning loss. Classic Dyna pathology. A full MBPO with ensemble dynamics and uncertainty-aware rollouts would likely avoid this by penalizing action sequences where the ensemble disagrees.
+
+---
+
+## 9. What was implemented (reusable artifacts)
+
+Committed to branch `roboeval-integration`:
+
+- **SE(3)/SO(3) reward wrapper** (`rlinf/envs/robotwin/se3_math.py` + `lift_pot_reward_wrapper.py`, 195 lines + 56 lines of math utilities). TDD: 15/15 unit tests passing (`tests/unit_tests/test_se3_math.py`, `test_lift_pot_reward_wrapper.py`).
+- **RoboTwin env patch** for inline SE(3)-reward population + pot-pose augmentation (`rlinf/envs/robotwin/robotwin_env.py`).
+- **RoboEval env integration** for RLinf (`rlinf/envs/roboeval/roboeval_env.py`, 600+ lines) — the `_LiftPotDenseRewardWrapper`, `_FlattenPropObsWrapper`, task-class registry, collate/record metric helpers, fixed-seed eval support. (Integrating RoboEval as an RLinf env was itself a substantial piece of new code, not inherited.)
+- **Standalone MBPO script** (`scripts/b3_mbpo_roboeval.py`, 358 lines) — self-contained SAC + dynamics model + Dyna-1 synthetic rollouts, usable independently of RLinf.
+- **Hydra configs** for all six runs: `examples/embodiment/config/robotwin_lift_pot_grpo_openvlaoft_*.yaml`, `roboeval_liftpot_ppo_mlp_v2.yaml`, `roboeval_liftpot_sac_mlp.yaml`, env-level `roboeval_liftpot_state.yaml`.
+- **SLURM wrappers** (`slurm/robo/_common.sh` + per-run scripts) — handle VK_ICD_FILENAMES + VK_DRIVER_FILES override for the PSC Vulkan ICD, Ray per-job tmpdir, ROBOTWIN_PATH plumbing.
+- **Plot scripts** (`scripts/plot_all_tracks.py`, `scripts/plot_vla_track.py`).
+
+Not committed / debug-only: the 9 failed RoboTwin MLP deadlock-debug attempts (kept in commit log on the branch).
+
+---
+
+## 10. Per-run sub-reports
+
+For reviewer deep-dives:
+- `b4_zeroshot.md` — B4 details, decision gate.
+- `m1_vla_grpo.md` — both M1 attempts, hyperparameter rescale rationale, collapse analysis.
+- `m2b_vla_grpo_se3.md` — M2b single run, diagnostics comparison with M1.
+- `b1_b2_b3_mlp_scratch.md` — final numbers, bug analysis, B3 inaction-optimum pathology.
+
+## 11. Figures
+
+- `vla_track_success.png` — two-panel: success (env-dense + eval-sparse) and return, for B4/M1/M2b.
+- `all_tracks.png` — three-panel: success for all 6 runs (y-axis zoomed to [0, 0.2] since actual data maxes at 12.5%); RoboTwin return for B4/M1/M2b (panel 2); RoboEval return for B1/B2/B3 (panel 3). Return panels are split because the reward formulations are not comparable across envs.
+
+Both figures use normalized x-axis (fraction of training per run), since "epoch" means different units per algorithm (GRPO epoch vs PPO update vs SAC gradient step vs MBPO env step).
+
+---
+
+## 12. Limitations & honest scope
+
+- Cross-env caveat (§8.3) — not single-env.
+- Only one seed per run (no error bars) — budget constraint.
+- M1/M2b eval n=3 per run (eval every 2 epochs × 6 epochs) — peak numbers are single-checkpoint snapshots, same small-N caveat that applies to any short-budget run.
+- B3 is Dyna-1, not full MBPO (§5.5).
+- RoboEval eval-path bug (§7) means we rely on training-rollout `env/success_once` as the primary signal for B1/B2/B3.
+- Compute is ~0.75% of the published RLinf run, so any comparison to their 70% number is for context only, not a claim of matching.

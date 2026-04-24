@@ -60,7 +60,7 @@ def main() -> None:
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 3, figsize=(18, 6.2))
 
     runs = [
         ("B4 zero-shot (RoboTwin)", args.b4, "#888888"),
@@ -114,7 +114,8 @@ def main() -> None:
     ax.set_title("Success — env (line, dense) vs eval (markers, sparse)")
     ax.set_ylim(-0.01, 0.20)
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=6.5, loc="upper right", ncol=1)
+    # Place legend below the panel so it never covers data.
+    ax.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=2, frameon=True)
 
     # ------------------ Panel 2: env/return on RoboTwin ---------------------
     ax = axes[1]
@@ -139,7 +140,7 @@ def main() -> None:
     ax.set_ylabel("env/return  (sparse 0/1 × reward_coef=5)")
     ax.set_title("Return — VLA track (RoboTwin, sparse reward)")
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc="lower right")
+    ax.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=1, frameon=True)
 
     # ------------------ Panel 3: env/return on RoboEval ---------------------
     ax = axes[2]
@@ -156,7 +157,7 @@ def main() -> None:
     ax.set_ylabel("env/return  (dense shaped reward w/ penalties)")
     ax.set_title("Return — MLP-from-scratch track (RoboEval, dense reward)")
     ax.grid(alpha=0.3)
-    ax.legend(fontsize=8, loc="lower right")
+    ax.legend(fontsize=7, loc="upper center", bbox_to_anchor=(0.5, -0.18), ncol=1, frameon=True)
 
     fig.suptitle(
         "Plan 1 full results — env (training rollouts, dense) overlaid with eval "
