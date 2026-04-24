@@ -169,6 +169,25 @@ Full RLinf does not expose a model-based RL worker, so this was written as a **s
 
 **Observed failure mode:** policy converged to near-zero actions. `eval/return ≈ -3`, well above B1/B2's -1000 range, because minimal action magnitudes keep the policy close to the reach-penalty origin. This is a well-known MBPO pathology when the learned dynamics is imperfect and the reward has dominant penalty terms — the policy exploits the dynamics model's prediction errors at shapes that coincidentally minimize the (learned) reward, which here means "don't move."
 
+### 5.6 Training-loop budget — consolidated table
+
+Since each algorithm uses a different notion of "step" and "batch", here's one table that lines them up so every run's actual training scale is directly visible.
+
+| run | train env parallelism | rollout horizon | steps per training iter | grad-batch / mini-batch | train iters reached | total env-steps | total trajectories | eval envs × rollouts | eval trajectories/checkpoint | # eval checkpoints |
+|---|---|---|---|---|---|---|---|---|---|---|
+| **B4** (zero-shot) | — | 200 | — (no training) | — | 0 | 0 (eval only) | 48 (3-roll × 16 envs) | 16 × 3 | 48 | 1 |
+| **M1** (GRPO, attempt 5) | 32 envs, group_size=4 → 8 unique states × 4 rollouts | 200 | 32 × 200 = **6,400 env-steps per GRPO epoch** | `global_batch=32`, `micro_batch=2`, grad_accum=16 | 6 GRPO epochs (wall-clock cap) | ~38,400 | 192 | 16 × 1 | 16 | 3 (every 2 epochs) |
+| **M2b** (GRPO + SE(3)) | same as M1 | 200 | same as M1 | same as M1 | 6 GRPO epochs | ~38,400 | 192 | 16 × 1 | 16 | 3 |
+| **B1** (PPO, RLinf) | 32 envs | 200 | 32 × 200 = **6,400 env-steps per PPO update** | `global_batch=64`, `micro_batch=32`, grad_accum=2 | 319 PPO updates (watchdog) | ~2.04 M | ~10,200 episodes | 16 × 1 | 16 | 32 (every 10 updates) |
+| **B2** (SAC, RLinf) | 32 envs | **2** (off-policy SAC — 2 env-steps per grad update, rest from replay) | 32 × 2 = **64 env-steps + 1 grad update** per SAC epoch | `global_batch=1024` (replay batch) | 5,660 SAC epochs (watchdog) | ~362 k | ~1,800 episodes | 16 × 1 | 16 | 28 (every 200 epochs) |
+| **B3** (MBPO, standalone) | 16 envs | 200 | 1 env-step per iter (+ 1 dyn update + 1 SAC update) | SAC batch 256 (50% real / 50% synth), dynamics batch 256 | 200,000 env-steps (completed) | 200,000 | ~1,000 episodes | 8 × 1 | 8 | 40 (every 5k env-steps) |
+
+Notes to read this table:
+- "Training iter" differs by algorithm: GRPO epoch = 1 full trajectory batch + PPO optimizer passes; PPO update = 1 rollout + 1 update; SAC epoch in RLinf = 1 rollout + 1 grad update; MBPO iter = 1 env-step + 1 dynamics update + 1 SAC update. **These are not comparable to each other.** The last four columns in normalized env-step and trajectory terms *are* comparable.
+- RLinf's SAC epoch is very short (2 env-steps before each grad update) — that's why B2 has the highest iter count but only ~362k env-steps total. This matches the SAC family's design point (many grad updates per env step, small online batch).
+- All eval columns use RoboEval/RoboTwin's `use_fixed_reset_state_ids: True` with 16 held-out reset seeds (8 for B3 to halve the eval cost on the standalone script). Eval uses deterministic / low-temperature action selection; training uses stochastic.
+- **Eval n is small for the VLA runs** (n=3 checkpoints × 16 envs = 48 eval episodes per run) which is why single-checkpoint peak values have non-trivial variance — see §7 for the full treatment of small-N eval noise vs the separate RoboEval instrumentation bug.
+
 ---
 
 ## 6. Compute and wall-clock
