@@ -256,10 +256,20 @@ For reviewer deep-dives:
 
 ## 11. Figures
 
-- `vla_track_success.png` — two-panel: success (env-dense + eval-sparse) and return, for B4/M1/M2b.
+- `vla_track_success.png` — two-panel: success (env-dense + eval-sparse) and return, for B4/M1/M2b. Uses the raw `GRPO epoch` index as x-axis (both M1 and M2b are the same algorithm with the same epoch granularity, so no normalization is needed).
 - `all_tracks.png` — three-panel: success for all 6 runs (y-axis zoomed to [0, 0.2] since actual data maxes at 12.5%); RoboTwin return for B4/M1/M2b (panel 2); RoboEval return for B1/B2/B3 (panel 3). Return panels are split because the reward formulations are not comparable across envs.
 
-Both figures use normalized x-axis (fraction of training per run), since "epoch" means different units per algorithm (GRPO epoch vs PPO update vs SAC gradient step vs MBPO env step).
+### 11.1 X-axis normalization in `all_tracks.png`
+
+Because the six runs use **different algorithms with different "step" units** — GRPO epoch (M1/M2b), PPO policy-update index (B1), SAC gradient-step index (B2), MBPO env-step counter (B3) — there is no common raw x-axis on which they can be overlaid. We therefore **min-max-normalize each run's step sequence independently** to the [0, 1] interval:
+
+$$\tilde{x}_i = \frac{s_i - s_\text{min}}{s_\text{max} - s_\text{min}}$$
+
+where $s_i$ is the $i$-th logged step of that run and $s_\text{min}, s_\text{max}$ are the first and last logged steps. The resulting $\tilde{x} = 0$ means "start of training" for that run and $\tilde{x} = 1$ means "end of training" (which, for B1/B2, is the 60-min watchdog cut, not 100% of the nominal budget — hence our runs cover different absolute compute amounts even though they all reach $\tilde{x}=1$).
+
+**Consequence for reading the plots:** the *x-alignment* of two curves is not meaningful in absolute terms. "M2b reaches 12.5% at $\tilde{x} = 1$" and "B1 reaches its env-rollout peak of 11.1% at $\tilde{x} \approx 0.3$" are both true statements about the shape of training, but they do *not* imply M2b took three times as long — M2b's $\tilde{x}=1$ is 2h 12m of 2× H100 (6 GRPO epochs), while B1's $\tilde{x} = 0.3$ is ~60 min of 2× H100 (~100 PPO updates). For absolute-compute comparison, see the GPU-hours table in §6.
+
+The `plot_all_tracks.py: normalize_x` helper implements this; the `env/success_once` and `env/return` panels use the same normalization so dense and sparse signals from the same run always line up on the x-axis.
 
 ---
 
