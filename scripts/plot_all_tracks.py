@@ -94,36 +94,24 @@ def main() -> None:
                 label=f"{name} env (peak {max(env_vals) * 100:.1f}%)",
             )
         if eval_vals:
-            # Flag isolated spikes to 1.0 as instrumentation bug (see doc).
-            # A spike = eval_success ≥ 0.99 for B1/B3 on RoboEval with return << 0.
+            # Drop known-bugged eval=1.0 spikes for RoboEval runs (info-dict
+            # key mismatch — see b1_b2_b3_mlp_scratch.md). At those steps,
+            # eval/return is deeply negative, so 16/16 "success" is impossible.
             is_roboeval = "(RoboEval)" in name
             x_norm = normalize_x(eval_steps)
-            clean_x, clean_y, bug_x, bug_y = [], [], [], []
-            for xv, yv in zip(x_norm, eval_vals):
-                if is_roboeval and yv >= 0.99:
-                    bug_x.append(xv); bug_y.append(yv)
-                else:
-                    clean_x.append(xv); clean_y.append(yv)
+            clean_x = [xv for xv, yv in zip(x_norm, eval_vals) if not (is_roboeval and yv >= 0.99)]
+            clean_y = [yv for yv in eval_vals if not (is_roboeval and yv >= 0.99)]
             if clean_x:
                 ax.plot(
                     clean_x, clean_y, "o",
                     color=color, markerfacecolor="white", markeredgewidth=1.5,
                     markersize=6, alpha=0.85,
-                    label=f"{name} eval (peak {max(clean_y) * 100:.1f}%, n={len(eval_vals)})",
-                )
-            if bug_x:
-                ax.plot(
-                    bug_x, bug_y, "x",
-                    color=color, markersize=11, markeredgewidth=2.5,
-                    label=f"{name} eval=1.0 (instrumentation bug, not real success)",
+                    label=f"{name} eval (peak {max(clean_y) * 100:.1f}%, n={len(clean_y)})",
                 )
 
     ax.set_xlabel("training progress (normalized, 0 → 1)")
     ax.set_ylabel("success_once")
-    ax.set_title(
-        "Success — env (line, dense) vs eval (markers, sparse)\n"
-        "✗ = RoboEval eval=1.0 spikes are an info-key bug (return << 0 at same step), not real success"
-    )
+    ax.set_title("Success — env (line, dense) vs eval (markers, sparse)")
     ax.set_ylim(-0.02, 1.05)
     ax.grid(alpha=0.3)
     ax.legend(fontsize=6.5, loc="upper right", ncol=1)
