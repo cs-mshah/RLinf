@@ -517,6 +517,21 @@
   </div>
 </section>
 
+<!-- ════════════════════════════════════════════════════ FINAL REPORT -->
+<section id="final">
+  <h2>Final Report &mdash; VLA + GRPO Fine-Tuning</h2>
+  <p>
+    Eval rollout from <em>Modification&nbsp;1</em> (OpenVLA-OFT fine-tuned with GRPO under the default sparse RoboTwin reward), recorded on a held-out reset seed where the policy successfully grasps both handles and lifts the pot. The original 10-frame eval clip is slowed roughly 6&times; with motion interpolation for visibility.
+  </p>
+
+  <div class="video-grid" style="grid-template-columns: 1fr;">
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/m1_vla_grpo_success_env12.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>VLA + GRPO Eval Success (held-out env 12, slowed 6&times;)</figcaption>
+    </figure>
+  </div>
+</section>
+
 <!-- ═══════════════════════════════════════════════════ MIDTERM REPORT -->
 <section id="midterm">
   <h2>Midterm Report &mdash; PPO &amp; SAC from Scratch</h2>
