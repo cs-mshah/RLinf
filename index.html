@@ -521,7 +521,7 @@
 <section id="final">
   <h2>Final Report &mdash; Eval Rollouts Across All Trained Agents</h2>
   <p>
-    Each grid below stitches the held-out eval rollouts across the 16 fixed reset seeds for one agent. The VLA-track grids (B4 zero-shot, M1 default-reward GRPO, M2b SE(3)-dense-reward GRPO) are short eval clips on the RoboTwin <code>lift_pot</code> task and are slowed roughly 6&times; with motion interpolation for visibility; the MLP-from-scratch grids (B1 PPO, B2 SAC) are full-length eval rollouts on the RoboEval LiftPot task and play at native speed.
+    Each grid below stitches the held-out eval rollouts across the 16 fixed reset seeds for one agent. The VLA-track grids (B4 zero-shot, M1 default-reward GRPO, M2b SE(3)-dense-reward GRPO) are short eval clips on the RoboTwin <code>lift_pot</code> task with only ten native frames each; we stretch them to roughly 2&nbsp;s by holding each real frame longer (no synthetic interpolation), so playback is intentionally choppy but every frame is a real rollout frame. The MLP-from-scratch grids (B1 PPO, B2 SAC, B3 MBPO) are full-length eval rollouts on the RoboEval LiftPot task and play at native speed.
   </p>
 
   <h3 style="margin-top: 24px;">VLA track (RoboTwin <code>lift_pot</code>)</h3>
