@@ -541,7 +541,7 @@
   </div>
 
   <h3 style="margin-top: 32px;">MLP-from-scratch track (RoboEval LiftPot)</h3>
-  <div class="video-grid" style="grid-template-columns: repeat(2, 1fr);">
+  <div class="video-grid" style="grid-template-columns: repeat(3, 1fr);">
     <figure class="video-card" onclick="openModal(this)">
       <video src="figures/b1_step319_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
       <figcaption>B1 &mdash; MLP-PPO, final checkpoint (0% sustained eval)</figcaption>
@@ -549,6 +549,10 @@
     <figure class="video-card" onclick="openModal(this)">
       <video src="figures/b2_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
       <figcaption>B2 &mdash; MLP-SAC, final checkpoint (0% sustained eval)</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/b3_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B3 &mdash; MLP-MBPO, final checkpoint (policy converges to near-zero actions: inaction is the result)</figcaption>
     </figure>
   </div>
 </section>
