@@ -376,22 +376,18 @@
 <section id="final">
   <h2>Final Report &mdash; Eval Rollouts Per Agent</h2>
   <p>
-    One representative held-out eval rollout per agent. For the VLA-track agents (B4 / M1 / M2b on RoboTwin <code>lift_pot</code>) we show the success-case env where the policy actually grasps and lifts the pot; M2b had two such successes (envs 1 and 9), both shown. For the MLP-from-scratch agents (B1 / B2 / B3 on RoboEval LiftPot) no run produced a sustained success, so we show env&nbsp;12 as a representative failure rollout. VLA-track clips have only ten native frames each and are slowed to roughly 2&nbsp;s by holding each real frame longer (no synthetic interpolation, no blending); MLP-track clips play at native ~6.7&nbsp;s.
+    One representative held-out eval rollout per agent. For the VLA-track agents (B4 / M1 / M2b on RoboTwin <code>lift_pot</code>) we show a success-case env where the policy actually grasps and lifts the pot. For the MLP-from-scratch agents (B1 / B2 / B3 on RoboEval LiftPot) no run produced a sustained success, so we show env&nbsp;12 as a representative failure rollout. VLA-track clips have only ten native frames each and are slowed to roughly 2&nbsp;s by holding each real frame longer (no synthetic interpolation, no blending); MLP-track clips play at native ~6.7&nbsp;s.
   </p>
 
   <h3 style="margin-top: 24px;">VLA track (RoboTwin <code>lift_pot</code>)</h3>
-  <div class="video-grid" style="grid-template-columns: repeat(4, 1fr);">
+  <div class="video-grid" style="grid-template-columns: repeat(3, 1fr);">
     <figure class="video-card" onclick="openModal(this)">
       <video src="figures/b4_env00_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>B4 &mdash; OpenVLA-OFT zero-shot, env&nbsp;0 (the single success)</figcaption>
+      <figcaption>B4 &mdash; OpenVLA-OFT zero-shot, env&nbsp;0 success</figcaption>
     </figure>
     <figure class="video-card" onclick="openModal(this)">
       <video src="figures/m1_env05_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
       <figcaption>M1 &mdash; VLA + GRPO (default reward), env&nbsp;5 success</figcaption>
-    </figure>
-    <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/m2b_env01_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>M2b &mdash; VLA + GRPO + SE(3) reward, env&nbsp;1 success</figcaption>
     </figure>
     <figure class="video-card" onclick="openModal(this)">
       <video src="figures/m2b_env09_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
