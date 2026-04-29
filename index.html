@@ -337,7 +337,7 @@
 <!-- ═══════════════════════════════════════════════════════════════ HERO -->
 <header class="hero">
   <div class="container">
-    <span class="venue">16-831 &middot; Intro to Robot Learning</span>
+    <span class="venue">16-831 &middot; Final Report</span>
     <h1>Fine-Tuning Vision-Language-Action Models<br/>via RL for Bimanual Manipulation</h1>
 
     <div class="authors">
@@ -365,7 +365,7 @@
     </div> -->
 
     <div class="tldr">
-      <strong>TL;DR &mdash;</strong> We propose to fine-tune OpenVLA-7B with PPO/GRPO via the RLinf system on the RoboEval LiftPot bimanual manipulation task, combined with an iterative dense reward function featuring SO(3) orientation control and smoothness penalties.
+      <strong>TL;DR &mdash;</strong> Across six agents on a bimanual pot-lift task and ~24 GPU-hours, OpenVLA-OFT fine-tuned with GRPO doubles the zero-shot success rate (6.25%&nbsp;&rarr;&nbsp;12.5%), while PPO, SAC, and a Dyna-style MBPO trained from scratch all stay at 0% sustained held-out success. Replacing the default sparse reward with our SE(3)/SO(3)-geodesic dense reward (Modification&nbsp;2) matches the same eval peak but produces a stronger training-rollout signal.
     </div>
   </div>
 </header>
@@ -420,45 +420,62 @@
 <section id="abstract">
   <h2>Abstract</h2>
   <p>
-    This proposal outlines a framework for achieving sample-efficient policy learning for the LiftPot task within the RoboEval framework, a MuJoCo-based environment requiring coordinated bimanual manipulation to grasp and lift a pot. We first establish a performance baseline by evaluating a random agent against an initial dense reward function composed of spatial distance, pose errors, and subtask progress. To address the complexities of bimanual coordination, we propose two primary modifications: (1)&nbsp;fine-tuning a pre-trained OpenVLA-7B model using RL to leverage foundation model representations for faster convergence, and (2)&nbsp;the iterative refinement of a dense reward function. This second modification focuses on redesigning the initial reward to better capture the complex contact dynamics and physical constraints essential for successful bimanual lifting.
+    We study whether a Vision-Language-Action (VLA) model pre-trained on a bimanual pot-lift task family, fine-tuned with reinforcement learning, can outperform RL-from-scratch MLP policies drawn from the three canonical RL algorithm families (on-policy policy-gradient, off-policy Q-learning, model-based) within a constrained compute budget. We train six agents: a random baseline; PPO, SAC, and a Dyna-style MBPO each from scratch; OpenVLA-OFT fine-tuned with GRPO under the default sparse reward; and the same VLA+GRPO system under an SE(3)/SO(3)-geodesic dense reward we design. Under ~24 GPU-hours of total compute, VLA+GRPO doubles the zero-shot success rate (6.25%&nbsp;&rarr;&nbsp;12.5%) while all three from-scratch MLPs fail to sustain any nonzero held-out success. The SE(3) reward (Modification&nbsp;2) matches the peak eval success of the default reward but produces a stronger training-rollout signal (12.5% vs.&nbsp;5.5%), suggesting dense SE(3) shaping works as designed even though the held-out peak was not lifted further within our budget.
   </p>
   <div class="keywords">
-    <span class="keyword">LiftPot</span>
+    <span class="keyword">VLA</span>
+    <span class="keyword">OpenVLA-OFT</span>
+    <span class="keyword">GRPO</span>
+    <span class="keyword">SE(3) Reward</span>
+    <span class="keyword">RoboTwin</span>
     <span class="keyword">RoboEval</span>
-    <span class="keyword">OpenVLA</span>
-    <span class="keyword">RL Fine-tuning</span>
-    <span class="keyword">Reward Shaping</span>
+    <span class="keyword">Bimanual Manipulation</span>
   </div>
 </section>
 
 <!-- ═══════════════════════════════════════════════════════ ENVIRONMENT -->
 <section id="environment">
-  <h2>Environment</h2>
+  <h2>Environments</h2>
   <p>
-    We evaluate our policy on the <strong>LiftPot</strong> task from the RoboEval benchmark <a href="#ref-roboeval">[1]</a>, a bimanual manipulation environment built on the MuJoCo <a href="#ref-mujoco">[2]</a> physics engine. The task requires a bimanual Franka Panda robot&mdash;consisting of two 7-DOF arms with parallel grippers and an optional 4-DOF floating base&mdash;to grasp a kitchen pot by both handles, lift it above a height threshold, and maintain an upright orientation. Four task variants introduce increasing difficulty by randomizing the pot's initial position and orientation.
+    We use two structurally similar bimanual pot-lift environments. Both have a 200-step horizon, a fixed 16-seed held-out eval pool, and the same task-success predicate (grip both handles, lift &ge; 10&nbsp;cm, keep upright within &plusmn;20&deg;), so <code>success_once</code> is directly comparable across them; returns are not.
   </p>
+  <ul style="margin: 12px 0 16px 24px;">
+    <li><strong>VLA track &mdash; RoboTwin <code>lift_pot</code>.</strong> Sapien physics, PIPER bimanual (two 7-DOF arms, 14-DOF action space), RGB images plus proprioception, sparse 0/1 reward scaled by <code>reward_coef=5</code>. Chosen because RLinf publish an OpenVLA-OFT SFT checkpoint for this exact task, anchoring the VLA-fine-tuning experiments.</li>
+    <li><strong>MLP-from-scratch track &mdash; RoboEval LiftPot</strong> <a href="#ref-roboeval">[1]</a>. MuJoCo <a href="#ref-mujoco">[2]</a> physics, BimanualPanda (two 7-DOF arms + grippers, 16-DOF action space), state-only proprioception (no pixels), dense shaped reward. Chosen because RLinf's MLP training pipeline was already wired up for this env after multiple RoboTwin from-scratch attempts hit a persistent <code>ActorGroup</code> deadlock.</li>
+  </ul>
   <p>
-    At each timestep, the agent receives a dictionary observation comprising proprioceptive signals (joint positions and velocities for both arms, gripper openness, and floating base state) as well as RGB and/or depth images from configurable cameras such as the head-mounted and wrist-mounted views. The agent produces a continuous action vector whose structure depends on the chosen control mode. In the default joint-position mode, this is a 20-dimensional vector specifying floating base commands, joint targets for each arm, and gripper commands. Alternatively, an end-effector mode allows the agent to specify Cartesian pose targets, which are internally converted to joint commands via inverse kinematics. The environment provides a sparse binary reward, returning $r=1$ only upon successful task completion.
-  </p>
-  <p>
-    Beyond the binary success signal, the environment records a rich set of diagnostic metrics: four subtask stages (left grasp, right grasp, lift, stable lift), bimanual coordination quality, collision counts, motion smoothness (Cartesian and joint-space jerk), path efficiency, grip slip counts, and task accuracy (lift distance, gripper-to-pot distances, pot orientation error).
+    The cross-environment caveat is acknowledged in the analysis: returns cannot be compared, but the success predicate can, and the from-scratch policies score identically zero on RoboEval, which upper-bounds what they would achieve on the structurally similar RoboTwin task within the same compute.
   </p>
 </section>
 
-<!-- ══════════════════════════════════════════════════════ DENSE REWARD -->
+<!-- ══════════════════════════════════════════════════════ REWARD FUNCTIONS -->
 <section id="dense-reward">
-  <h2>Dense Reward</h2>
+  <h2>Reward Functions</h2>
   <p>
-    We propose a dense reward function as a baseline to evaluate a random agent, since the RoboEval framework only provides a binary sparse reward, which is always 0 with random actions. The reward function at time step $t$ is:
+    Three reward formulations are used across the six agents.
   </p>
+  <h3 style="margin-top: 18px;">RoboEval dense shaped reward (random, B1, B2, B3)</h3>
   <div class="equation-block">
-    $$r_t = -w_{\text{reach}}\left(d_t^{\text{left}} + d_t^{\text{right}}\right) + w_{\text{grasp}} \cdot p_t + w_{\text{lift}} \cdot \max(0, \Delta h_t) - w_{\text{pose}} \cdot e_t^{\text{pose}} + w_{\text{success}} \cdot \mathbf{1}[\text{success}]$$
+    $$r_t = -w_{\text{reach}}\!\left(d_t^{\text{left}} + d_t^{\text{right}}\right) + w_{\text{grasp}} \cdot p_t + w_{\text{lift}} \max(0, \Delta h_t) - w_{\text{pose}} \cdot e_t^{\text{pose}} + w_{\text{success}} \mathbf{1}[\text{success}] - w_{\text{AR}} \|a_t - a_{t-1}\|_2^2$$
   </div>
   <p>
-    where $d_t^{\text{left}}$ and $d_t^{\text{right}}$ are the Euclidean distances from the left and right grippers to the pot (in meters), $p_t \in [0, 1]$ is the subtask progress defined as the fraction of completed stages out of four, $\Delta h_t = h_t - h_0$ is the pot's height above its initial resting position, and $e_t^{\text{pose}}$ is the angular deviation from the upright orientation (in radians).
+    Standard shaped reward with reach, subtask, lift, pose, success, and action-rate terms. Default weights $w_{\text{reach}}{=}1.0$, $w_{\text{grasp}}{=}2.0$, $w_{\text{lift}}{=}5.0$, $w_{\text{pose}}{=}0.5$, $w_{\text{success}}{=}10.0$, $w_{\text{AR}}{=}0.1$.
   </p>
+
+  <h3 style="margin-top: 18px;">RoboTwin default sparse reward (B4 zero-shot, M1)</h3>
+  <div class="equation-block">
+    $$r_t = 5 \cdot \mathbf{1}[\text{task success predicate at step } t]$$
+  </div>
   <p>
-    The first term encourages both grippers to approach the pot handles, the second rewards incremental task progress, the third incentivizes lifting, the fourth penalizes tilting, and the final term provides a large bonus upon task completion. The default weights are $w_{\text{reach}} = 1.0$, $w_{\text{grasp}} = 2.0$, $w_{\text{lift}} = 5.0$, $w_{\text{pose}} = 0.5$, and $w_{\text{success}} = 10.0$.
+    Zero everywhere except success; return accumulates only after the policy first solves the task.
+  </p>
+
+  <h3 style="margin-top: 18px;">SE(3)/SO(3)-geodesic dense reward (M2b, ours)</h3>
+  <div class="equation-block">
+    $$\begin{aligned} r_t^{\text{SE(3)}} = \; & -w_p \|p_{\text{pot}} - p_{\text{target}}\|_2 - w_R\, d_{SO(3)}(R_{\text{pot}}, R_{\text{target}}) - w_{ga}\!\!\sum_{s \in \{L, R\}} \|\log_{SE(3)}(H_s^{-1} G_s)\|_2 \\ & + w_{\text{lift}}\max(0, h_t) + w_{\text{grasp}} \cdot \text{subtask}(t) + w_{\text{success}} \mathbf{1}[\text{success}] - w_{\text{smooth}} \|a_t - a_{t-1}\|_2^2 \end{aligned}$$
+  </div>
+  <p>
+    Coordinate-free dense reward replacing the ad hoc scalar pose term with geodesic distances on the rotation and rigid-body groups, following the geometric control framework of Bullo &amp; Murray <a href="#ref-bullo">[9]</a>. The SO(3) term is the minimum rotation angle aligning $R_{\text{pot}}$ with $R_{\text{target}}$; the gripper-handle term uses the SE(3) twist norm of the relative transform between each gripper frame $G_s$ and target handle frame $H_s$. The subtask term is a four-step staircase: $0.5$ per gripper grasp plus $0.25$ once the pot is lifted &gt; 5&nbsp;cm. Avoids gimbal lock and generalizes to non-upright targets. Implemented in <code>rlinf/envs/robotwin/lift_pot_reward_wrapper.py</code> with a 15/15-passing unit-test suite for the SE(3)/SO(3) primitives. Default weights $w_p{=}1.0, w_R{=}0.3, w_{ga}{=}0.5, w_{\text{lift}}{=}5.0, w_{\text{grasp}}{=}2.0, w_{\text{success}}{=}10.0, w_{\text{smooth}}{=}0.1$.
   </p>
 </section>
 
@@ -466,84 +483,66 @@
 <section id="method">
   <h2>Method</h2>
   <p>
-    Our primary goal is to fine-tune the OpenVLA-7B policy through reinforcement learning to achieve coordinated bimanual manipulation in the LiftPot task, based on the following modifications.
+    We train six agents on a ~24 GPU-hour total budget (PSC Bridges-2, 2&times; H100 Grace-Hopper). One untrained reference, three RL-from-scratch MLP policies (one per major algorithm family), and two VLA+RL modifications. A seventh "agent" (B4 OpenVLA-OFT zero-shot) is included as a no-RL anchor for the VLA track.
   </p>
-
-  <h3>Modification #1 &mdash; RL Fine-Tuning via RLinf</h3>
-  <p>
-    By integrating the RoboEval environment into RLinf&mdash;a high-performance training system that transforms high-level RL workflows into optimized micro-execution flows <a href="#ref-rlinf">[3]</a>&mdash;we enable the physics simulator to operate as a distributed worker alongside a large-scale vision-language-action model. This architecture facilitates the fine-tuning of the OpenVLA-7B model <a href="#ref-openvla">[4]</a> using on-policy algorithms, specifically Proximal Policy Optimization (PPO) <a href="#ref-ppo">[5]</a> and Group Relative Policy Optimization (GRPO) <a href="#ref-grpo">[6]</a>.
-  </p>
-  <p>
-    These methods are designed to align large models with specific task objectives and improve their ability to autonomously interact with complex physical environments. By leveraging the scaling capabilities of the RLinf system, we can effectively manage the memory and computational demands of training a 7B-parameter policy for bimanual robotics tasks.
-  </p>
-
-  <h3>Modification #2 &mdash; Dense Reward Refinement</h3>
-  <p>
-    We also plan to compare with off-policy Q-function based and model-based RL algorithms trained in the RoboEval environment. We plan to modify and improve over our initial reward function.
-  </p>
-
-  <h3 style="margin-top:20px;">Trajectory Smoothness</h3>
-  <p>
-    The existing reward does not penalize abrupt or jittery motions, which can damage hardware during sim-to-real transfer. Recent work has incorporated smoothness objectives as regularization directly into the reward <a href="#ref-jiang">[7]</a>, and jerk minimization has been integrated as an explicit objective alongside task accuracy <a href="#ref-zhang">[8]</a>. We propose augmenting the reward with a penalty on either the instantaneous Cartesian jerk or the squared action rate between consecutive timesteps. The RoboEval environment already computes per-step jerk internally for diagnostics, making this readily available for reward shaping.
-  </p>
-
-  <h3>Geometric Orientation Reward on SO(3)</h3>
-  <p>
-    The current reward penalizes orientation error through a scalar deviation from the upright pose, computed via ad hoc dot products. This formulation does not generalize to arbitrary desired orientations and decomposes the error into two independent axis-projection checks that do not correspond to a single coherent distance on SO(3).
-  </p>
-  <p>
-    We propose replacing this term with a reward derived from the geodesic distance on the rotation group SO(3), following the geometric control framework of Bullo &amp; Murray <a href="#ref-bullo">[9]</a>. Given the current pot orientation $R_t \in \mathrm{SO}(3)$ and a desired target orientation $R_d \in \mathrm{SO}(3)$, the orientation error is:
-  </p>
-  <div class="equation-block">
-    $$e_R = \left\| \left( \log R_d^\top R_t \right)^\vee \right\|$$
-  </div>
-  <p>
-    where $(\cdot)^\vee$ denotes the vee map from skew-symmetric matrices to $\mathbb{R}^3$. This scalar error equals the minimum rotation angle needed to align $R_t$ with $R_d$, is coordinate-free, and avoids gimbal lock or representation singularities. The orientation reward term then becomes:
-  </p>
-  <div class="equation-block">
-    $$r_t^{\text{orient}} = -w_{\text{pose}} \cdot e_R$$
-  </div>
+  <ul style="margin: 8px 0 16px 24px;">
+    <li><strong>Random &mdash;</strong> uniform random actions on RoboEval. Lower bound on the dense return.</li>
+    <li><strong>B1 / MLP-PPO from scratch</strong> <a href="#ref-ppo">[5]</a>. RLinf actor, 2-layer 256-unit MLP, lr=3e-4, clip=0.2, GAE-&lambda;=0.95, 32 envs &times; 128-step rollouts.</li>
+    <li><strong>B2 / MLP-SAC from scratch</strong>. RLinf actor, same MLP head, lr=3e-4, &tau;=0.005, automatic entropy tuning, 200K-transition replay buffer.</li>
+    <li><strong>B3 / Dyna-1 MBPO from scratch.</strong> Standalone PyTorch loop (RLinf does not expose a model-based worker): deterministic MLP dynamics model, SAC actor/critic, 50/50 mix of real and one-step synthetic transitions. No ensemble, no uncertainty-weighted rollouts.</li>
+    <li><strong>B4 / OpenVLA-OFT zero-shot</strong> <a href="#ref-openvla">[4]</a>. The published <code>RLinf-OpenVLAOFT-RoboTwin-SFT-lift_pot</code> 7B checkpoint, evaluated without any RL fine-tuning. Reference anchor for the VLA track.</li>
+    <li><strong>M1 / VLA + GRPO</strong> <a href="#ref-grpo">[6]</a>, default sparse reward. Fine-tunes the SFT checkpoint with Group-Relative Policy Optimization on RLinf <a href="#ref-rlinf">[3]</a>: <code>global_batch=32</code>, <code>group_size=4</code>, lr=5e-5 (square-root-scaled from RLinf's published 2e-4 at our 32&times; smaller global batch), <code>kl_coef=0</code>, FSDP across 2&times; H100, 6 GRPO epochs (wall-clock cap).</li>
+    <li><strong>M2b / VLA + GRPO + SE(3) reward.</strong> Identical setup to M1; only the reward differs (SE(3)/SO(3) dense, see above). Pose/gripper fields needed for the reward are populated inline in RLinf's RoboTwin wrapper since Sapien's subprocess-vectorized envs do not accept <code>gym.Wrapper</code> composition cleanly.</li>
+  </ul>
 </section>
 
 <!-- ══════════════════════════════════════════════════════════ RESULTS -->
 <section id="results">
-  <h2>Results &mdash; Random Agent</h2>
+  <h2>Results</h2>
   <p>
-    Since actions are sampled uniformly at random, the dense return varies significantly across episodes depending on the resulting arm trajectories. Longer episodes accumulate more penalty as the arms drift farther from the pot handles, increasing the distance-based cost. Additionally, random arm motions can knock the pot over, causing large orientation errors that further penalize the return. Notably, Episode 2 runs for 182 steps yet incurs a relatively modest return of $-52.80$; in this case, the arms happen to randomly remain near the pot and jiggle in place, keeping the distance error low. All episodes result in failure (success&nbsp;=&nbsp;0).
+    Headline numbers under the mean-of-last-5 held-out eval convention. Among RL-trained methods, only the VLA+GRPO runs (M1, M2b) attain nonzero success; the from-scratch MLP runs (B1/B2/B3) are at zero. The OpenVLA-OFT zero-shot reference (B4) attains 6.25% without any RL, which is what the M1/M2b 12.5% peaks improve over (a 2&times; lift on top of the pretrained VLA).
   </p>
-
-  <div class="figure">
-    <img src="figures/return_plot.png" alt="Random-agent evaluation: accumulated average return versus total environment steps" />
-    <figcaption>Random-agent evaluation: accumulated average return versus total environment steps.</figcaption>
-  </div>
 
   <div class="table-wrapper">
     <table>
       <thead>
         <tr>
-          <th>Episode</th>
-          <th>Episode Length</th>
-          <th>Dense Return</th>
-          <th>Success</th>
+          <th>ID</th>
+          <th>Method</th>
+          <th>Track</th>
+          <th>Peak eval <code>success_once</code></th>
+          <th>Training-rollout peak</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>1</td><td>16</td><td>$-24.88$</td><td>0</td></tr>
-        <tr><td>2</td><td>182</td><td>$-52.80$</td><td>0</td></tr>
-        <tr><td>3</td><td>57</td><td>$-16.16$</td><td>0</td></tr>
-        <tr><td>4</td><td>23</td><td>$-25.01$</td><td>0</td></tr>
-        <tr><td>5</td><td>200</td><td>$-491.06$</td><td>0</td></tr>
-        <tr class="mean-row"><td>Mean</td><td>95.6</td><td>$-121.98 \pm 184.95$</td><td>0.0</td></tr>
+        <tr><td>Random</td><td>Uniform random actions</td><td>RoboEval</td><td>0%</td><td>n/a</td></tr>
+        <tr><td>B1</td><td>MLP-PPO from scratch</td><td>RoboEval</td><td>0%</td><td>11.1% &rarr; last 5.3%</td></tr>
+        <tr><td>B2</td><td>MLP-SAC from scratch</td><td>RoboEval</td><td>0%</td><td>3.1% &rarr; last 0%</td></tr>
+        <tr><td>B3</td><td>MLP-MBPO (Dyna-1)</td><td>RoboEval</td><td>0%</td><td>not logged</td></tr>
+        <tr><td>B4</td><td>OpenVLA-OFT zero-shot (no RL)</td><td>RoboTwin</td><td>6.25%</td><td>n/a</td></tr>
+        <tr><td>M1</td><td>VLA + GRPO, default reward</td><td>RoboTwin</td><td><strong>12.5%</strong> at ep.&nbsp;2</td><td>5.5%</td></tr>
+        <tr><td>M2b</td><td>VLA + GRPO + SE(3) reward</td><td>RoboTwin</td><td><strong>12.5%</strong> at ep.&nbsp;4</td><td><strong>12.5%</strong></td></tr>
       </tbody>
     </table>
   </div>
-  <figcaption style="text-align:center; font-size:0.88rem; color:#6b7280; font-style:italic; margin-top:-8px;">Random agent evaluation on LiftPot (5 episodes, max 200 steps).</figcaption>
+  <figcaption style="text-align:center; font-size:0.88rem; color:#6b7280; font-style:italic; margin-top:-8px;">Held-out success summary across all six trained agents plus the B4 zero-shot reference. Published RLinf number on this task is 70.3% after 1000 GRPO epochs on 8&times; H100; our budget is ~0.75% of that compute.</figcaption>
+
+  <h3 style="margin-top: 28px;">Takeaways</h3>
+  <ul style="margin: 8px 0 16px 24px;">
+    <li><strong>VLA pretraining is the load-bearing ingredient in this regime.</strong> ~7 GPU-hours of GRPO fine-tuning on top of OpenVLA-OFT moves zero-shot 6.25% to 12.5%; ~12 GPU-hours of from-scratch RL across three algorithm families (on-policy PG, off-policy Q-learning, model-based) sustains 0%.</li>
+    <li><strong>SE(3) reward is a null result on eval, mild positive on training rollouts.</strong> Peak eval ties with the default reward (12.5% vs 12.5%), but M2b is the only VLA+RL run whose <em>training-rollout</em> success also reaches 12.5% (vs M1's 5.5%), and its training diagnostics are healthier (<code>clip_fraction</code> 0.32 at epoch 3 vs M1's 0.57). The denser signal works as designed; held-out generalization is bottlenecked elsewhere &mdash; most likely GRPO group sparsity on a 3.13% SFT, no entropy regularization, and seed distribution drift between train and eval.</li>
+    <li><strong>MBPO inaction pathology.</strong> B3's policy converges to near-zero actions: the dense reward's penalty terms are minimized in the "do nothing" basin where the learned dynamics model is most accurate. Classic Dyna pathology that a full MBPO with ensemble dynamics and uncertainty-aware rollouts would likely avoid.</li>
+  </ul>
+
+  <p>
+    See the per-agent eval rollouts at the top of the page for one representative held-out env per method.
+  </p>
 </section>
 
 <!-- ══════════════════════════════════════════════════════════ VIDEOS -->
 <section id="videos">
-  <h2>Videos</h2>
-  <p>Visualizations of the random agent policy rollouts in the LiftPot environment from different camera views. Click a video to expand.</p>
+  <h2>Random-Agent Camera Views</h2>
+  <p>Visualizations of the random-agent policy rollouts in the RoboEval LiftPot environment from different camera views, retained from earlier project stages. Click a video to expand.</p>
 
   <div class="video-grid">
     <figure class="video-card" onclick="openModal(this)">
@@ -564,9 +563,9 @@
 
 <!-- ═══════════════════════════════════════════════════ MIDTERM REPORT -->
 <section id="midterm">
-  <h2>Midterm Report &mdash; PPO &amp; SAC from Scratch</h2>
+  <h2>Midterm Snapshot &mdash; PPO &amp; SAC from Scratch</h2>
   <p>
-    As an initial baseline, we train both an on-policy (PPO) and off-policy (SAC) agent from scratch on the LiftPot task using a small MLP policy. Neither method uses pretrained weights or demonstration data. Below are evaluation rollout videos for each method.
+    Earlier eval rollouts of the on-policy (PPO) and off-policy (SAC) MLP-from-scratch agents on RoboEval LiftPot, retained as historical context. The final-report results above include longer-trained versions of these same algorithms (B1 / B2) plus an MBPO baseline and the VLA+GRPO modifications.
   </p>
 
   <div class="video-grid" style="grid-template-columns: repeat(2, 1fr);">
