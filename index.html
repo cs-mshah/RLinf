@@ -519,15 +519,36 @@
 
 <!-- ════════════════════════════════════════════════════ FINAL REPORT -->
 <section id="final">
-  <h2>Final Report &mdash; VLA + GRPO Fine-Tuning</h2>
+  <h2>Final Report &mdash; Eval Rollouts Across All Trained Agents</h2>
   <p>
-    Eval rollout from <em>Modification&nbsp;1</em> (OpenVLA-OFT fine-tuned with GRPO under the default sparse RoboTwin reward), recorded on a held-out reset seed where the policy successfully grasps both handles and lifts the pot. The original 10-frame eval clip is slowed roughly 6&times; with motion interpolation for visibility.
+    Each grid below stitches the held-out eval rollouts across the 16 fixed reset seeds for one agent. The VLA-track grids (B4 zero-shot, M1 default-reward GRPO, M2b SE(3)-dense-reward GRPO) are short eval clips on the RoboTwin <code>lift_pot</code> task and are slowed roughly 6&times; with motion interpolation for visibility; the MLP-from-scratch grids (B1 PPO, B2 SAC) are full-length eval rollouts on the RoboEval LiftPot task and play at native speed.
   </p>
 
-  <div class="video-grid" style="grid-template-columns: 1fr;">
+  <h3 style="margin-top: 24px;">VLA track (RoboTwin <code>lift_pot</code>)</h3>
+  <div class="video-grid" style="grid-template-columns: repeat(3, 1fr);">
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/m1_vla_grpo_success_env12.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>VLA + GRPO Eval Success (held-out env 12, slowed 6&times;)</figcaption>
+      <video src="figures/b4_zeroshot_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B4 &mdash; OpenVLA-OFT Zero-Shot (6.25%)</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/m1_step1_peak_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>M1 &mdash; VLA + GRPO, default reward (peak 12.5%, epoch&nbsp;2)</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/m2b_step3_peak_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>M2b &mdash; VLA + GRPO + SE(3) reward (peak 12.5%, epoch&nbsp;4)</figcaption>
+    </figure>
+  </div>
+
+  <h3 style="margin-top: 32px;">MLP-from-scratch track (RoboEval LiftPot)</h3>
+  <div class="video-grid" style="grid-template-columns: repeat(2, 1fr);">
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/b1_step319_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B1 &mdash; MLP-PPO, final checkpoint (0% sustained eval)</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/b2_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B2 &mdash; MLP-SAC, final checkpoint (0% sustained eval)</figcaption>
     </figure>
   </div>
 </section>
