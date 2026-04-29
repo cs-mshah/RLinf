@@ -374,40 +374,44 @@
 
 <!-- ════════════════════════════════════════════════════ FINAL REPORT -->
 <section id="final">
-  <h2>Final Report &mdash; Eval Rollouts Across All Trained Agents</h2>
+  <h2>Final Report &mdash; Eval Rollouts Per Agent</h2>
   <p>
-    Each grid below stitches the held-out eval rollouts across the 16 fixed reset seeds for one agent. The VLA-track grids (B4 zero-shot, M1 default-reward GRPO, M2b SE(3)-dense-reward GRPO) are short eval clips on the RoboTwin <code>lift_pot</code> task with only ten native frames each; we stretch them to roughly 2&nbsp;s by holding each real frame longer (no synthetic interpolation), so playback is intentionally choppy but every frame is a real rollout frame. The MLP-from-scratch grids (B1 PPO, B2 SAC, B3 MBPO) are full-length eval rollouts on the RoboEval LiftPot task and play at native speed.
+    One representative held-out eval rollout per agent. For the VLA-track agents (B4 / M1 / M2b on RoboTwin <code>lift_pot</code>) we show the success-case env where the policy actually grasps and lifts the pot; M2b had two such successes (envs 1 and 9), both shown. For the MLP-from-scratch agents (B1 / B2 / B3 on RoboEval LiftPot) no run produced a sustained success, so we show env&nbsp;12 as a representative failure rollout. VLA-track clips have only ten native frames each and are slowed to roughly 2&nbsp;s by holding each real frame longer (no synthetic interpolation, no blending); MLP-track clips play at native ~6.7&nbsp;s.
   </p>
 
   <h3 style="margin-top: 24px;">VLA track (RoboTwin <code>lift_pot</code>)</h3>
-  <div class="video-grid" style="grid-template-columns: repeat(3, 1fr);">
+  <div class="video-grid" style="grid-template-columns: repeat(4, 1fr);">
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/b4_zeroshot_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>B4 &mdash; OpenVLA-OFT Zero-Shot (6.25%)</figcaption>
+      <video src="figures/b4_env00_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B4 &mdash; OpenVLA-OFT zero-shot, env&nbsp;0 (the single success)</figcaption>
     </figure>
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/m1_step1_peak_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>M1 &mdash; VLA + GRPO, default reward (peak 12.5%, epoch&nbsp;2)</figcaption>
+      <video src="figures/m1_env05_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>M1 &mdash; VLA + GRPO (default reward), env&nbsp;5 success</figcaption>
     </figure>
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/m2b_step3_peak_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>M2b &mdash; VLA + GRPO + SE(3) reward (peak 12.5%, epoch&nbsp;4)</figcaption>
+      <video src="figures/m2b_env01_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>M2b &mdash; VLA + GRPO + SE(3) reward, env&nbsp;1 success</figcaption>
+    </figure>
+    <figure class="video-card" onclick="openModal(this)">
+      <video src="figures/m2b_env09_success.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>M2b &mdash; VLA + GRPO + SE(3) reward, env&nbsp;9 success</figcaption>
     </figure>
   </div>
 
   <h3 style="margin-top: 32px;">MLP-from-scratch track (RoboEval LiftPot)</h3>
   <div class="video-grid" style="grid-template-columns: repeat(3, 1fr);">
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/b1_step319_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>B1 &mdash; MLP-PPO, final checkpoint (0% sustained eval)</figcaption>
+      <video src="figures/b1_env12.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B1 &mdash; MLP-PPO, env&nbsp;12 (0% sustained eval)</figcaption>
     </figure>
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/b2_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>B2 &mdash; MLP-SAC, final checkpoint (0% sustained eval)</figcaption>
+      <video src="figures/b2_env12.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B2 &mdash; MLP-SAC, env&nbsp;12 (0% sustained eval)</figcaption>
     </figure>
     <figure class="video-card" onclick="openModal(this)">
-      <video src="figures/b3_final_grid.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
-      <figcaption>B3 &mdash; MLP-MBPO, final checkpoint (policy converges to near-zero actions: inaction is the result)</figcaption>
+      <video src="figures/b3_env12.mp4" muted loop playsinline onmouseover="this.play()" onmouseout="this.pause();this.currentTime=0;"></video>
+      <figcaption>B3 &mdash; MLP-MBPO, env&nbsp;12 (policy converges to near-zero actions)</figcaption>
     </figure>
   </div>
 </section>
